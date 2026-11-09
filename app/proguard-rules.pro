@@ -3,14 +3,14 @@
 -dontwarn io.github.libxposed.**
 -adaptresourcefilecontents META-INF/xposed/java_init.list
 
--keep class com.hazbu.xcam.** { *; }
+-keep class com.suryasukma.vcamtest.** { *; }
 
 -keep class io.github.libxposed.api.** { *; }
 -keep interface io.github.libxposed.api.** { *; }
 -keep class io.github.libxposed.service.** { *; }
 -keep interface io.github.libxposed.service.** { *; }
 
--keep public class com.hazbu.xcam.xposed.XCamModule {
+-keep public class com.suryasukma.vcamtest.xposed.XCamModule {
     public <init>(io.github.libxposed.api.XposedInterface, io.github.libxposed.api.XposedModuleInterface$ModuleLoadedParam);
 }
 

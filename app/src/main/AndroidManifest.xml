@@ -36,7 +36,7 @@
 
         <provider
             android:name="io.github.libxposed.service.XposedProvider"
-            android:authorities="com.hazbu.xcam.XposedService"
+            android:authorities="com.suryasukma.vcamtest.XposedService"
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
@@ -50,7 +50,7 @@
         </activity>
         <provider
             android:name=".data.SettingsProvider"
-            android:authorities="com.hazbu.xcam.provider"
+            android:authorities="com.suryasukma.vcamtest.provider"
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
     </application>

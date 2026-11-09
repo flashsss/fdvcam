@@ -11,7 +11,7 @@
 - Lint/format: _(isi nanti)_
 
 ## Struktur
-- `app/src/main/java/com/hazbu/xcam/`: `hooks/` (Camera1/2, ImageReader, Capture, Audio, WebRtc), `core/` (engine, capture, surface, audio), `xposed/` (entry), `ui/`.
+- `app/src/main/java/com/suryasukma/vcamtest/`: `hooks/` (Camera1/2, ImageReader, Capture, Audio, WebRtc), `core/` (engine, capture, surface, audio), `xposed/` (entry), `ui/`.
 
 ## Konvensi
 - Bahasa komunikasi: Indonesia. Kode, nama variabel, dan commit message: Inggris.
