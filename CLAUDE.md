@@ -2,16 +2,16 @@
 
 ## Project
 - Repo: Testing2 (suryasukma0710-cpu/Testing2)
-- Status: baru, belum ada kode. Perbarui bagian ini setelah stack ditentukan.
+- Modul Xposed kamera virtual (untuk testing), awalnya salinan persis hazbu/xCam (GPL-3.0; jaga LICENSE + atribusi).
+- Stack: Kotlin/Java, Gradle, LibXposed API 101, Android 9+.
 
 ## Perintah
-- Install: _(isi nanti)_
-- Dev: _(isi nanti)_
-- Test: _(isi nanti)_
+- Build: `./gradlew assembleDebug`
+- Test: `./gradlew test`
 - Lint/format: _(isi nanti)_
 
 ## Struktur
-_(isi setelah ada folder utama, contoh: `src/` kode, `tests/` tes)_
+- `app/src/main/java/com/hazbu/xcam/`: `hooks/` (Camera1/2, ImageReader, Capture, Audio, WebRtc), `core/` (engine, capture, surface, audio), `xposed/` (entry), `ui/`.
 
 ## Konvensi
 - Bahasa komunikasi: Indonesia. Kode, nama variabel, dan commit message: Inggris.
