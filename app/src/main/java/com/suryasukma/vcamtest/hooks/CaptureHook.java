@@ -77,6 +77,17 @@ public class CaptureHook {
         }
     }
 
+    private long lastSkipLogMs = 0L;
+
+    /** Throttled diagnostics: explains why a decode/compress during the capture window was left untouched. */
+    private void logSkip(String what) {
+        long now = System.currentTimeMillis();
+        if (module.isCapturingState() && now - lastSkipLogMs > 300) {
+            lastSkipLogMs = now;
+            module.logHook("[~] capture window: " + what + " left untouched");
+        }
+    }
+
     private static boolean looksLikeCaptureDecode(java.util.List<Object> a) {
         try {
             byte[] src = (byte[]) a.get(0);
@@ -105,6 +116,10 @@ public class CaptureHook {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
                         Object[] newArgs = null;
+                        if (module.isCapturingState() && module.getMediaPath() != null
+                                && !looksLikeCaptureDecode(chain.getArgs())) {
+                            logSkip("decodeByteArray (not a capture-sized JPEG)");
+                        }
                         if (module.isCapturingState() && module.getMediaPath() != null
                                 && looksLikeCaptureDecode(chain.getArgs())) {
                             // Never let a hook bug crash the host app: on any failure fall back to the original call.
@@ -160,6 +175,10 @@ public class CaptureHook {
                 if (method.getName().equals("decodeStream") && method.getParameterTypes().length >= 1) {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
+                        if (module.isCapturingState() && module.getMediaPath() != null
+                                && !module.hasInjectionToken()) {
+                            logSkip("decodeStream (injection already done)");
+                        }
                         if (module.isCapturingState() && module.getMediaPath() != null
                                 && module.hasInjectionToken() && !isBoundsOnly(chain.getArgs(), 2)) {
                             int activeW = imageReaderHook.getActiveCaptureWidth();

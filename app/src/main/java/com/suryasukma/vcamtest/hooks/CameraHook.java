@@ -185,6 +185,7 @@ public class CameraHook {
             for (Method m : Camera.class.getDeclaredMethods()) {
                 if (m.getName().equals("takePicture") && m.getParameterTypes().length == 4) {
                     module.hook(m).intercept(chain -> {
+                        module.logHook("[*] Camera#takePicture called (media=" + (module.getMediaPath() != null) + ", jpegCallback=" + (chain.getArgs().get(3) != null) + ")");
                         if (module.getMediaPath() == null) return chain.proceed();
                         Camera camera = (Camera) chain.getThisObject();
                         PictureCallback jpegCallback = (PictureCallback) chain.getArgs().get(3);
@@ -204,7 +205,11 @@ public class CameraHook {
                             return chain.proceed();
                         }
 
-                        if (imageData == null) return chain.proceed();
+                        if (imageData == null) {
+                            module.logHook("[!] takePicture: no virtual photo available, using the real camera");
+                            return chain.proceed();
+                        }
+                        module.logHook("[+] takePicture: delivering virtual photo " + picW + "x" + picH + " (" + imageData.length + " bytes)");
 
                         module.recordPipelineNode("Camera1(takePicture " + picW + "x" + picH + " JPEG)");
                         module.reportPipelineCapture(picW, picH, imageData);
