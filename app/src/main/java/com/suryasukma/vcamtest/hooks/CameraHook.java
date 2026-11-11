@@ -24,6 +24,7 @@ import io.github.libxposed.api.XposedModuleInterface;
  * Consolidated all Legacy Camera logic including Renderer hooks.
  */
 public class CameraHook {
+    private static final long PICTURE_DELIVERY_DELAY_MS = 150;
     private final XCamModule module;
     private final Handler mainHandler;
     private final Set<String> hookedPreviewCallbackClasses = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -220,9 +221,17 @@ public class CameraHook {
                                 // The real takePicture() never ran, so the preview was never stopped:
                                 // do not restart it here (that re-opened the preview after the app had closed the camera).
                                 jpegCallback.onPictureTaken(imageData, camera);
-                            } catch (Throwable ignored) {}
+                            } catch (Throwable t) {
+                                module.logHook("[!] takePicture callback threw: " + t);
+                            }
                         };
-                        if (Looper.myLooper() == Looper.getMainLooper()) deliver.run(); else mainHandler.post(deliver);
+                        // The real camera always delivers picture callbacks asynchronously, on the looper of the thread that
+                        // opened it. Calling them synchronously inside takePicture() breaks apps that update their
+                        // "taking photo" state after the call returns, so post to the caller's own looper after a short
+                        // delay that mimics the capture time.
+                        Looper callerLooper = Looper.myLooper();
+                        Handler target = callerLooper != null ? new Handler(callerLooper) : mainHandler;
+                        target.postDelayed(deliver, PICTURE_DELIVERY_DELAY_MS);
                         return null;
                     });
                     module.logHook("[+] Hooked: Camera#takePicture (Legacy)");
