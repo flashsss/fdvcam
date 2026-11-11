@@ -32,6 +32,7 @@ import com.google.android.material.color.DynamicColors
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.suryasukma.vcamtest.R
+import com.suryasukma.vcamtest.media.MediaLibrary
 import com.suryasukma.vcamtest.data.Constants.KEY_ENABLE_CAPTURE_NOTIF
 import com.suryasukma.vcamtest.data.Constants.KEY_IS_MIRRORED
 import com.suryasukma.vcamtest.data.Constants.KEY_LATEST_PIPELINE_APP
@@ -50,11 +51,6 @@ import io.github.libxposed.service.XposedServiceHelper
 
 class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener {
 
-    companion object {
-        private const val VIRTUAL_PREFIX = "virtual."
-        private const val DEFAULT_VIDEO_NAME = "virtual.mp4"
-    }
-
     private lateinit var ivPreview: ImageView
     private lateinit var tvNoPreview: TextView
     private lateinit var btnDeleteMedia: MaterialButton
@@ -62,6 +58,10 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
     private lateinit var btnRotateLeft: MaterialButton
     private lateinit var btnRotateRight: MaterialButton
     private lateinit var btnSelectVideo: MaterialButton
+    private lateinit var btnEdit: MaterialButton
+    private lateinit var btnResetOriginal: MaterialButton
+    private lateinit var tvMediaInfo: TextView
+    private lateinit var layoutNoPreview: View
     private lateinit var tvModuleStatus: TextView
     private lateinit var cardModuleStatus: com.google.android.material.card.MaterialCardView
     private lateinit var cardScopedApps: com.google.android.material.card.MaterialCardView
@@ -87,6 +87,10 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
             Toast.makeText(this, "Notification permission is required for Capture Alert Card", Toast.LENGTH_SHORT).show()
         }
     }
+
+    private val editorLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { loadSettings() }
 
     private val videoPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -178,6 +182,10 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         btnRotateLeft = findViewById(R.id.btn_rotate_left)
         btnRotateRight = findViewById(R.id.btn_rotate_right)
         btnSelectVideo = findViewById(R.id.btn_select_video)
+        btnEdit = findViewById(R.id.btn_edit)
+        btnResetOriginal = findViewById(R.id.btn_reset_original)
+        tvMediaInfo = findViewById(R.id.tv_media_info)
+        layoutNoPreview = findViewById(R.id.layout_no_preview)
         tvModuleStatus = findViewById(R.id.tv_module_status)
         cardModuleStatus = findViewById(R.id.card_module_status)
         cardScopedApps = findViewById(R.id.card_scoped_apps)
@@ -256,6 +264,19 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
             updatePreviewTransform()
         }
         btnDeleteMedia.setOnClickListener { deleteMedia() }
+        btnEdit.setOnClickListener { editorLauncher.launch(Intent(this, EditorActivity::class.java)) }
+        btnResetOriginal.setOnClickListener {
+            MediaLibrary.resetToOriginal(this) { path, error ->
+                runOnUiThread {
+                    if (path != null) {
+                        saveMediaPath(path)
+                        Toast.makeText(this, R.string.toast_reset_done, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this, error ?: "Reset failed", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
         btnSelectVideo.setOnClickListener {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -267,56 +288,16 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
     }
 
     private fun copyMediaToInternal(uri: Uri) {
-        try {
-            val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-            val isImage = mimeType.startsWith("image/")
-            val isVideo = mimeType.startsWith("video/")
-
-            if (!isImage && !isVideo) {
-                Toast.makeText(this, "Invalid file type. Only images and videos are supported.", Toast.LENGTH_LONG).show()
-                return
+        Toast.makeText(this, "Importing…", Toast.LENGTH_SHORT).show()
+        MediaLibrary.importUri(this, uri) { path, error ->
+            runOnUiThread {
+                if (path != null) {
+                    saveMediaPath(path)
+                    Toast.makeText(this, R.string.toast_media_imported, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, getString(R.string.toast_media_import_failed, error), Toast.LENGTH_LONG).show()
+                }
             }
-            
-            filesDir.listFiles { _, name -> name.startsWith(VIRTUAL_PREFIX) }?.forEach { it.delete() }
-
-            val extension = android.webkit.MimeTypeMap.getSingleton()
-                .getExtensionFromMimeType(mimeType) ?: "bin"
-
-            if (isImage) {
-                val internalImage = File(filesDir, VIRTUAL_PREFIX + extension)
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(internalImage).use { output -> input.copyTo(output) }
-                }
-                
-                val outputVideo = File(filesDir, DEFAULT_VIDEO_NAME)
-                Toast.makeText(this, "Converting image to video...", Toast.LENGTH_SHORT).show()
-                
-                com.suryasukma.vcamtest.utils.MediaConverter.convertImageToMp4(
-                    this, Uri.fromFile(internalImage), outputVideo
-                ) { success ->
-                    runOnUiThread {
-                        internalImage.delete()
-                        if (success) {
-                            saveMediaPath(outputVideo.absolutePath)
-                            Toast.makeText(this, R.string.toast_media_imported, Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(this, "Conversion failed", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            } else {
-                val internalFile = File(filesDir, VIRTUAL_PREFIX + extension)
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(internalFile).use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                saveMediaPath(internalFile.absolutePath)
-                Toast.makeText(this, R.string.toast_media_imported, Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            val errorMsg = getString(R.string.toast_media_import_failed, e.message)
-            Toast.makeText(this, errorMsg, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -364,26 +345,41 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
     private fun updatePreview(path: String) {
         if (path.isEmpty() || !File(path).exists()) {
             ivPreview.setImageBitmap(null)
-            tvNoPreview.visibility = View.VISIBLE
+            layoutNoPreview.visibility = View.VISIBLE
+            tvMediaInfo.visibility = View.GONE
             btnDeleteMedia.visibility = View.GONE
+            btnEdit.isEnabled = false
+            btnResetOriginal.visibility = View.GONE
             return
         }
-        tvNoPreview.visibility = View.GONE
+        layoutNoPreview.visibility = View.GONE
         btnDeleteMedia.visibility = View.VISIBLE
+        btnEdit.isEnabled = true
+        btnResetOriginal.visibility = if (MediaLibrary.sourceFile(this) != null) View.VISIBLE else View.GONE
         try {
-            if (path.endsWith(".mp4", ignoreCase = true)) {
+            val file = File(path)
+            val info = mutableListOf<String>()
+            if (MediaLibrary.isVideo(file)) {
                 val retriever = MediaMetadataRetriever()
                 retriever.setDataSource(path)
-                val bitmap = retriever.getFrameAtTime(1000000)
-                ivPreview.setImageBitmap(bitmap)
+                ivPreview.setImageBitmap(retriever.getFrameAtTime(1000000))
+                val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                 retriever.release()
+                if (w != null && h != null) info += if (rot % 180 != 0) "${h}×${w}" else "${w}×${h}"
+                if (dur > 0) info += String.format(Locale.US, "%d:%02d", dur / 60000, (dur / 1000) % 60)
             } else {
-                val bitmap = BitmapFactory.decodeFile(path)
-                ivPreview.setImageBitmap(bitmap)
+                ivPreview.setImageBitmap(BitmapFactory.decodeFile(path))
             }
+            info += android.text.format.Formatter.formatShortFileSize(this, file.length())
+            tvMediaInfo.text = info.joinToString("  ·  ")
+            tvMediaInfo.visibility = View.VISIBLE
         } catch (_: Exception) {
             ivPreview.setImageBitmap(null)
-            tvNoPreview.visibility = View.VISIBLE
+            layoutNoPreview.visibility = View.VISIBLE
+            tvMediaInfo.visibility = View.GONE
         }
     }
 
@@ -407,7 +403,7 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
     }
 
     private fun deleteMedia() {
-        filesDir.listFiles { _, name -> name.startsWith(VIRTUAL_PREFIX) }?.forEach { it.delete() }
+        MediaLibrary.clearAll(this)
         saveMediaPath("")
         Toast.makeText(this, R.string.toast_media_removed, Toast.LENGTH_SHORT).show()
     }

@@ -22,5 +22,31 @@
     <string name="label_last_active_app">Target: %s</string>
     <string name="label_last_route">Hook Route: %s</string>
     <string name="label_last_timestamp">Time: %s</string>
+    <string name="btn_edit">Edit</string>
+    <string name="btn_reset_original">Reset to original</string>
+    <string name="label_quick_transform">Quick transform</string>
+    <string name="label_quick_transform_desc">Applied live, no re-encoding</string>
+    <string name="title_editor">Edit media</string>
+    <string name="btn_apply">Apply</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="tab_crop">Crop</string>
+    <string name="tab_rotate">Rotate</string>
+    <string name="tab_adjust">Adjust</string>
+    <string name="tab_trim">Trim</string>
+    <string name="aspect_free">Free</string>
+    <string name="btn_reset_crop">Reset crop</string>
+    <string name="label_brightness">Brightness</string>
+    <string name="label_contrast">Contrast</string>
+    <string name="label_saturation">Saturation</string>
+    <string name="btn_reset_adjust">Reset adjustments</string>
+    <string name="desc_flip_h">Flip horizontal</string>
+    <string name="desc_flip_v">Flip vertical</string>
+    <string name="label_trim_range">Trim range: %1$s – %2$s</string>
+    <string name="toast_no_changes">No changes to apply</string>
+    <string name="toast_edit_failed">Edit failed</string>
+    <string name="toast_edit_done">Edit applied</string>
+    <string name="toast_reset_done">Restored original media</string>
+    <string name="label_processing">Processing…</string>
+    <string name="toast_no_source">No media to edit</string>
 </resources>
 

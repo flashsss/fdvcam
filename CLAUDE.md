@@ -11,7 +11,8 @@
 - Lint/format: _(isi nanti)_
 
 ## Struktur
-- `app/src/main/java/com/suryasukma/vcamtest/`: `hooks/` (Camera1/2, ImageReader, Capture, Audio, WebRtc), `core/` (engine, capture, surface, audio), `xposed/` (entry), `ui/`.
+- `app/src/main/java/com/suryasukma/vcamtest/`: `hooks/` (Camera1/2, ImageReader, Capture, Audio, WebRtc), `core/` (engine, capture, surface, audio), `xposed/` (entry), `ui/` (MainActivity, EditorActivity, CropOverlayView), `media/` (EditSpec, MediaEditor, MediaLibrary).
+- Edit: editor membakar crop/rotate/flip/adjust/trim ke `virtual.mp4` via Media3 Transformer; file asli disimpan di `source.*` (reset ke original).
 
 ## Konvensi
 - Bahasa komunikasi: Indonesia. Kode, nama variabel, dan commit message: Inggris.
