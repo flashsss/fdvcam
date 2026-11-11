@@ -24,13 +24,11 @@ import io.github.libxposed.api.XposedModuleInterface;
  * Consolidated all Legacy Camera logic including Renderer hooks.
  */
 public class CameraHook {
-    private static final long PREVIEW_RESTART_DELAY_MS = 100;
-
     private final XCamModule module;
     private final Handler mainHandler;
     private final Set<String> hookedPreviewCallbackClasses = Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private Surface viewfinderSurface;
-    private SurfaceTexture dummySurfaceTexture;
+    private volatile Surface viewfinderSurface;
+    private volatile SurfaceTexture dummySurfaceTexture;
 
     public CameraHook(XCamModule module) {
         this.module = module;
@@ -110,7 +108,9 @@ public class CameraHook {
                     if (dummySurfaceTexture == null) {
                         dummySurfaceTexture = new SurfaceTexture(10);
                     }
+                    Surface old = viewfinderSurface;
                     viewfinderSurface = new Surface(texture);
+                    if (old != null) { try { old.release(); } catch (Throwable ignored) {} }
                     module.registerPreviewSurface(viewfinderSurface);
                     module.logHook("[+] Hijacked Camera#setPreviewTexture -> diverted camera to dummy texture");
                     Object[] newArgs = chain.getArgs().toArray();
@@ -137,10 +137,8 @@ public class CameraHook {
             module.hook(stopPreview).intercept(chain -> {
                 Object result = chain.proceed();
                 try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
-                if (dummySurfaceTexture != null) {
-                    try { dummySurfaceTexture.release(); } catch (Throwable ignored) {}
-                    dummySurfaceTexture = null;
-                }
+                // The real camera is still bound to the dummy texture after stopPreview();
+                // it is only released together with the camera (see hookRelease).
                 return result;
             });
             module.logHook("[+] Hooked: Camera#stopPreview");
@@ -246,12 +244,28 @@ public class CameraHook {
             });
             module.logHook("[+] Hooked: Camera#setOneShotPreviewCallback");
 
-            Method addCallbackBuffer = Camera.class.getDeclaredMethod("addCallbackBuffer", byte[].class);
-            module.hook(addCallbackBuffer).intercept(chain -> chain.proceed());
-            module.logHook("[+] Hooked: Camera#addCallbackBuffer");
         } catch (Throwable t) {
             module.logHook("[!] Failed to hook preview callbacks: " + t.getMessage());
         }
+    }
+
+    // Camera#getParameters() is a binder call + string parsing: never do it per preview frame.
+    private final java.util.Map<Camera, long[]> previewSizeCache =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    private int[] cachedPreviewSize(Camera camera) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        long[] e = previewSizeCache.get(camera);
+        if (e != null && now - e[2] < 1500) return new int[]{(int) e[0], (int) e[1]};
+        int w = 640;
+        int h = 480;
+        try {
+            Camera.Parameters params = camera.getParameters();
+            Camera.Size size = params != null ? params.getPreviewSize() : null;
+            if (size != null) { w = size.width; h = size.height; }
+        } catch (Throwable ignored) {}
+        previewSizeCache.put(camera, new long[]{w, h, now});
+        return new int[]{w, h};
     }
 
     private void processCallbackRegistration(Object callback) {
@@ -272,18 +286,9 @@ public class CameraHook {
                             byte[] buffer = (byte[]) chain.getArgs().get(0);
                             Camera camera = (Camera) chain.getArgs().get(1);
                             if (buffer != null && camera != null && module.getMediaPath() != null) {
-                                int w = 640;
-                                int h = 480;
-                                try {
-                                    Camera.Parameters params = camera.getParameters();
-                                    if (params != null) {
-                                        Camera.Size size = params.getPreviewSize();
-                                        if (size != null) {
-                                            w = size.width;
-                                            h = size.height;
-                                        }
-                                    }
-                                } catch (Throwable ignored) {}
+                                int[] ps = cachedPreviewSize(camera);
+                                int w = ps[0];
+                                int h = ps[1];
 
                                 int[] dims = resolveDimensions(w, h, buffer.length);
                                 w = dims[0];
@@ -329,11 +334,9 @@ public class CameraHook {
                             cameraField.setAccessible(true);
                             Camera camera = (Camera) cameraField.get(chain.getThisObject());
                             if (camera != null) {
-                                Camera.Size size = camera.getParameters().getPreviewSize();
-                                if (size != null) {
-                                    w = size.width;
-                                    h = size.height;
-                                }
+                                int[] ps = cachedPreviewSize(camera);
+                                w = ps[0];
+                                h = ps[1];
                             }
                         } catch (Throwable ignored) {}
 
@@ -379,7 +382,13 @@ public class CameraHook {
             module.hook(release).intercept(chain -> {
                 module.logHook("[*] Camera#release invoked");
                 try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
-                return chain.proceed();
+                try {
+                    return chain.proceed();
+                } finally {
+                    SurfaceTexture st = dummySurfaceTexture;
+                    dummySurfaceTexture = null;
+                    if (st != null) { try { st.release(); } catch (Throwable ignored) {} }
+                }
             });
             module.logHook("[+] Hooked: Camera#release");
         } catch (Throwable t) {

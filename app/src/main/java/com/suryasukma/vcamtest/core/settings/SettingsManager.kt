@@ -5,9 +5,9 @@ import androidx.core.net.toUri
 import com.suryasukma.vcamtest.data.Constants.AUTHORITY
 
 class SettingsManager {
-    var mediaPath: String? = null
-    var isMirrored = false
-    var rotationAngle = 0
+    @Volatile var mediaPath: String? = null
+    @Volatile var isMirrored = false
+    @Volatile var rotationAngle = 0
 
     fun refreshSettings(context: Context) {
         try {

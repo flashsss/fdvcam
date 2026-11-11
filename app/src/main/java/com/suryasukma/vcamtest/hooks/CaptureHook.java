@@ -393,7 +393,16 @@ public class CaptureHook {
         long startMediaPosMs = (target.startMediaPosMs > 0) ? target.startMediaPosMs : lastStartMediaPosMs;
         long recordDurationMs = (startWallClock > 0) ? (stopWallClockMs - startWallClock) : 0;
         module.logHook("[*] MediaRecorder#stop timing: Duration=" + recordDurationMs + " ms, StartMediaPos=" + startMediaPosMs + " ms");
-        module.showToast("Rec: " + (startMediaPosMs / 1000) + "s -> " + ((startMediaPosMs + recordDurationMs) / 1000) + "s");
+
+        // Audio-only recordings (voice notes) must never be overwritten with video.
+        if (target.path != null) {
+            String lower = target.path.toLowerCase(java.util.Locale.ROOT);
+            if (lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".ogg") || lower.endsWith(".opus")
+                    || lower.endsWith(".amr") || lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".oga")) {
+                module.logHook("[*] MediaRecorder#stop: audio-only output, skipping replacement");
+                return;
+            }
+        }
 
         boolean replaced = false;
         long copiedBytes = 0;

@@ -91,7 +91,13 @@ object MediaLibrary {
     }
 
     private fun materialize(ctx: Context, src: File, onDone: (String?, String?) -> Unit) {
-        if (isVideo(src)) {
+        if (isVideo(src) && !src.extension.equals("mp4", ignoreCase = true)) {
+            // Every hook path expects an .mp4 file, so convert other containers (mov, mkv, 3gp, webm...) once at import.
+            val out = File(ctx.filesDir, DEFAULT_VIDEO_NAME)
+            MediaEditor.editVideo(ctx, src, EditSpec(), out) { ok ->
+                if (ok) onDone(out.absolutePath, null) else onDone(null, "Video conversion failed")
+            }
+        } else if (isVideo(src)) {
             val dst = File(ctx.filesDir, VIRTUAL_PREFIX + src.extension)
             io.execute {
                 try {

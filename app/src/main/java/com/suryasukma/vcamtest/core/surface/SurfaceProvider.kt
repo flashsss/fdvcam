@@ -13,6 +13,7 @@ class SurfaceProvider(private val logAction: (String) -> Unit) {
 
     private fun log(msg: String) = logAction("[SURFACE-PROVIDER] $msg")
 
+    @Synchronized
     fun getDummySurface(): Surface {
         if ((dummySurface == null) || !dummySurface!!.isValid) {
             log("Creating new dummy surface")
@@ -29,6 +30,7 @@ class SurfaceProvider(private val logAction: (String) -> Unit) {
         return dummySurface!!
     }
 
+    @Synchronized
     fun release() {
         dummySurface?.release()
         dummyST?.release()

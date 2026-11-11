@@ -57,7 +57,23 @@ class XCamModule : XposedModule() {
     fun setIgnoringHooks(ignore: Boolean) { ignoreHooks.set(ignore) }
 
     val context: Context? get() = mContext
-    val mediaPath: String? get() = settings.mediaPath
+    @Volatile private var lastSettingsRefreshMs = 0L
+    @Volatile private var refreshInFlight = false
+
+    /** Current media (null = module off or no media). Settings are re-read in the background at most every 2 s. */
+    val mediaPath: String?
+        get() {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val ctx = mContext
+            if (ctx != null && !refreshInFlight && now - lastSettingsRefreshMs > 2000) {
+                lastSettingsRefreshMs = now
+                refreshInFlight = true
+                Thread({
+                    try { settings.refreshSettings(ctx) } catch (_: Throwable) {} finally { refreshInFlight = false }
+                }, "FDVCam-Settings").apply { isDaemon = true }.start()
+            }
+            return settings.mediaPath
+        }
     var previewSwapped: Boolean
         get() = surfaceManager.previewSwapped
         set(value) { surfaceManager.previewSwapped = value }
@@ -231,12 +247,17 @@ class XCamModule : XposedModule() {
         } catch (_: Throwable) {}
     }
 
+    /** Settings come from a ContentProvider (binder): never block the host app's startup on it. */
+    private fun refreshSettingsAsync(ctx: Context) {
+        Thread({ runCatching { settings.refreshSettings(ctx) } }, "FDVCam-Settings").apply { isDaemon = true }.start()
+    }
+
     private fun hookContextInit() {
         val currentApp = SystemUtils.getCurrentApplication()
         if (currentApp != null && !isInitialized) {
             mContext = currentApp
             logInit("Context immediately resolved from ActivityThread: ${mContext?.packageName}")
-            mContext?.let { settings.refreshSettings(it) }
+            mContext?.let { refreshSettingsAsync(it) }
             isInitialized = true
         }
 
@@ -247,9 +268,10 @@ class XCamModule : XposedModule() {
             hook(attachMethod).intercept { chain ->
                 val result = chain.proceed()
                 if (!isInitialized) {
-                    mContext = chain.thisObject as? Context
+                    // Prefer the application context so we never keep an Activity alive.
+                    mContext = (chain.thisObject as? Context)?.let { it.applicationContext ?: it }
                     logInit("Context Initialized: ${mContext?.packageName}")
-                    mContext?.let { settings.refreshSettings(it) }
+                    mContext?.let { refreshSettingsAsync(it) }
                     isInitialized = true
                 }
                 result

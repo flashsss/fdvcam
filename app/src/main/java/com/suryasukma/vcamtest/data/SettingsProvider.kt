@@ -74,7 +74,7 @@ class SettingsProvider : ContentProvider() {
         
         cursor.addRow(arrayOf(
             videoUri,
-            if (hasMedia) "1" else "0",
+            if (hasMedia && (prefs?.getBoolean(KEY_IS_ENABLED, true) != false)) "1" else "0",
             if (prefs?.getBoolean(KEY_IS_MIRRORED, false) == true) "1" else "0",
             (prefs?.getInt(KEY_ROTATION_ANGLE, 0) ?: 0).toString()
         ))

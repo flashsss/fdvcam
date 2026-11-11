@@ -24,7 +24,22 @@ class CaptureManager(
     @Volatile var isCapturing = false
         private set
 
-    @Volatile private var cachedCaptureFrame: ByteArray? = null
+    private data class CaptureKey(
+        val path: String, val width: Int, val height: Int, val rotation: Int, val mirrored: Boolean,
+    )
+
+    // Keyed by everything that changes the output, so a small stream frame can never be served as a full-size photo.
+    private val cacheLock = Any()
+    private val captureCache = object : LinkedHashMap<CaptureKey, ByteArray>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CaptureKey, ByteArray>?) = size > 3
+    }
+    private val captureLock = Any()
+
+    private fun cacheGet(key: CaptureKey, maxSize: Int): ByteArray? =
+        synchronized(cacheLock) { captureCache[key]?.takeIf { it.size <= maxSize } }
+
+    private fun cachePut(key: CaptureKey, value: ByteArray) = synchronized(cacheLock) { captureCache[key] = value }
+    private fun cacheClear() = synchronized(cacheLock) { captureCache.clear() }
     @Volatile private var cachedStreamFrame: ByteArray? = null
     
     private var lastCapturePulseTime = 0L
@@ -40,7 +55,7 @@ class CaptureManager(
     fun reset() {
         uiHandler.removeCallbacksAndMessages(null)
         isCapturing = false
-        cachedCaptureFrame = null
+        cacheClear()
         cachedStreamFrame = null
         streamKey = null
         streamExtractionRunning = false
@@ -56,13 +71,13 @@ class CaptureManager(
         log("[*] Pulse detected! Target Frame Time: $captureTimeMs ms")
 
         isCapturing = true
-        cachedCaptureFrame = null
+        cacheClear()
 
         contextProvider()?.let { refreshSettingsAction(it) }
         uiHandler.removeCallbacksAndMessages(null)
         uiHandler.postDelayed({
             isCapturing = false
-            uiHandler.postDelayed({ cachedCaptureFrame = null }, 5000)
+            uiHandler.postDelayed({ cacheClear() }, 5000)
         }, 3000)
     }
 
@@ -112,17 +127,17 @@ class CaptureManager(
         if (isIgnoringHooks() || path == null) return null
         val context = contextProvider() ?: return null
 
-        return synchronized(this) {
-            val cached = cachedCaptureFrame
-            if (cached != null && cached.size <= maxSizeBytes) {
-                cached
-            } else {
-                performExtraction(
-                    context, path, width, height, rotationAngle, isMirrored, captureTimeMs, maxSizeBytes, setIgnoringHooks, liveFrame
-                ).also {
-                    cachedCaptureFrame = it
-                    if (it != null) log("[+] Capture extraction successful (liveFrame: ${liveFrame != null}, size: ${it.size})")
-                }
+        val key = CaptureKey(path, width, height, rotationAngle, isMirrored)
+        cacheGet(key, maxSizeBytes)?.let { return it }
+
+        // Heavy work is serialized on its own lock (not the stream lock) and re-checks the cache once inside.
+        return synchronized(captureLock) {
+            cacheGet(key, maxSizeBytes)?.let { return@synchronized it }
+            performExtraction(
+                context, path, width, height, rotationAngle, isMirrored, captureTimeMs, maxSizeBytes, setIgnoringHooks, liveFrame
+            )?.also {
+                cachePut(key, it)
+                log("[+] Capture extraction successful (liveFrame: ${liveFrame != null}, size: ${it.size})")
             }
         }
     }
