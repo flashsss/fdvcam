@@ -14,7 +14,8 @@ class SettingsManager {
             val uri = "content://$AUTHORITY".toUri()
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    mediaPath = cursor.getString(0)
+                    val enabled = cursor.getString(1) == "1"
+                    mediaPath = cursor.getString(0)?.takeIf { enabled && it.isNotBlank() }
                     isMirrored = cursor.getString(2) == "1"
                     rotationAngle = cursor.getString(3).toIntOrNull() ?: 0
                 }

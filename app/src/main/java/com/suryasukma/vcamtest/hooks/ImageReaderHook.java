@@ -120,7 +120,6 @@ public class ImageReaderHook {
                             String shortFmt = getShortFormatName(format);
                             module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
                             module.logHook("[+] ImageReader.newInstance: " + w + "x" + h + " " + fmtName + " | ID: " + surfaceId);
-                            module.showToast(w + "x" + h + " (" + fmtName + ")");
                         }
                         return result;
                     });
@@ -153,7 +152,6 @@ public class ImageReaderHook {
                             String shortFmt = getShortFormatName(format);
                             module.recordPipelineNode("ImageReader.Builder(" + w + "x" + h + " " + shortFmt + ")");
                             module.logHook("[+] ImageReader.Builder.build: " + w + "x" + h + " " + fmtName + " | ID: " + surfaceId);
-                            module.showToast(w + "x" + h + " (" + fmtName + ")");
                         }
                         return result;
                     });
@@ -261,13 +259,16 @@ public class ImageReaderHook {
         if (!detectedFlows.contains(key)) {
             detectedFlows.add(key);
             String fmt = getFormatName(format);
-            module.showToast(w + "x" + h + " (" + fmt + ")");
             module.logHook("[*] Activity: ImageReader first image acquired: " + key);
         }
 
         if (module.getMediaPath() != null && format == ImageFormat.YUV_420_888) {
             module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
-            module.injectYuvFrame(image, w, h);
+            try {
+                module.injectYuvFrame(image, w, h);
+            } catch (Throwable t) {
+                module.logHook("[!] YUV injection failed: " + t);
+            }
             if (injectedFlows.add(key)) {
                 module.logHook("[+] Activity: ImageReader YUV replacement active: " + key);
             }
@@ -287,6 +288,8 @@ public class ImageReaderHook {
                                 return;
                             }
                             buffer.put(replacement);
+                            buffer.limit(replacement.length);
+                            buffer.rewind();
                             module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
                             module.reportPipelineCapture(w, h, replacement);
                             module.logHook("[+] Activity: ImageReader JPEG replaced successfully (" + replacement.length + " bytes)");

@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
     private lateinit var btnCopyPipeline: MaterialButton
     private lateinit var btnClearPipeline: MaterialButton
 
+    private var loadingSettings = false
     private var isMirrored = false
     private var rotationAngle = 0
     private var mXposedService: XposedService? = null
@@ -201,6 +202,7 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         btnClearPipeline = findViewById(R.id.btn_clear_pipeline)
 
         switchCaptureNotif.setOnCheckedChangeListener { _, isChecked ->
+            if (loadingSettings) return@setOnCheckedChangeListener
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit {
                 putBoolean(KEY_ENABLE_CAPTURE_NOTIF, isChecked)
             }
@@ -306,7 +308,9 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         val mediaPath = prefs.getString(KEY_MEDIA_PATH, "") ?: ""
         isMirrored = prefs.getBoolean(KEY_IS_MIRRORED, false)
         rotationAngle = prefs.getInt(KEY_ROTATION_ANGLE, 0)
+        loadingSettings = true
         switchCaptureNotif.isChecked = prefs.getBoolean(KEY_ENABLE_CAPTURE_NOTIF, true)
+        loadingSettings = false
         updatePreview(mediaPath)
         updatePreviewTransform()
         loadTelemetryUI()

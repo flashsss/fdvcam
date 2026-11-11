@@ -265,6 +265,7 @@ class EditorActivity : AppCompatActivity() {
         trimEnd = durationMs
         sliderTrim.valueFrom = 0f
         sliderTrim.valueTo = durationMs.toFloat()
+        sliderTrim.setMinSeparationValue(minOf(500f, durationMs / 4f))
         sliderTrim.values = listOf(0f, durationMs.toFloat())
         updateTrimLabel()
     }
@@ -374,7 +375,7 @@ class EditorActivity : AppCompatActivity() {
                 }
             }
         }
-        if (isVideo) MediaEditor.editVideo(this, src, spec, tmp, done)
-        else MediaEditor.editImage(this, src, spec, tmp, done)
+        if (isVideo) MediaEditor.editVideo(applicationContext, src, spec, tmp, done)
+        else MediaEditor.editImage(applicationContext, src, spec, tmp, done)
     }
 }

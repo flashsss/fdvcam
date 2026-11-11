@@ -150,10 +150,10 @@ class CropOverlayView @JvmOverloads constructor(
                     Drag.TR -> resizeCorner(false, true, dx, dy)
                     Drag.BL -> resizeCorner(true, false, dx, dy)
                     Drag.BR -> resizeCorner(false, false, dx, dy)
-                    Drag.L -> crop.left = (crop.left + dx).coerceIn(image.left, crop.right - minSize)
-                    Drag.R -> crop.right = (crop.right + dx).coerceIn(crop.left + minSize, image.right)
-                    Drag.T -> crop.top = (crop.top + dy).coerceIn(image.top, crop.bottom - minSize)
-                    Drag.B -> crop.bottom = (crop.bottom + dy).coerceIn(crop.top + minSize, image.bottom)
+                    Drag.L -> crop.left = safeIn(crop.left + dx, image.left, crop.right - minSize)
+                    Drag.R -> crop.right = safeIn(crop.right + dx, crop.left + minSize, image.right)
+                    Drag.T -> crop.top = safeIn(crop.top + dy, image.top, crop.bottom - minSize)
+                    Drag.B -> crop.bottom = safeIn(crop.bottom + dy, crop.top + minSize, image.bottom)
                     Drag.NONE -> {}
                 }
                 invalidate()
@@ -166,6 +166,8 @@ class CropOverlayView @JvmOverloads constructor(
         }
         return true
     }
+
+    private fun safeIn(v: Float, lo: Float, hi: Float): Float = if (hi < lo) lo else v.coerceIn(lo, hi)
 
     private fun move(dx: Float, dy: Float) {
         val mx = dx.coerceIn(image.left - crop.left, image.right - crop.right)

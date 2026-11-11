@@ -119,6 +119,7 @@ class MediaEngine(private val logAction: (String) -> Unit) {
 
                 val exoPlayer = ExoPlayer.Builder(context.applicationContext, renderersFactory).build()
                 player = exoPlayer
+                exoPlayer.volume = 0f // video only: the audio path is handled by AudioHook
 
                 val mediaItem = MediaItem.fromUri(uri)
 

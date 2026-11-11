@@ -74,6 +74,27 @@ public class CaptureHook {
         }
     }
 
+    private static boolean looksLikeCaptureDecode(java.util.List<Object> a) {
+        try {
+            byte[] src = (byte[]) a.get(0);
+            if (src == null || src.length < 30000) return false;
+            if (a.size() >= 4 && a.get(3) instanceof BitmapFactory.Options
+                    && ((BitmapFactory.Options) a.get(3)).inJustDecodeBounds) return false;
+            return (src[0] & 0xFF) == 0xFF && (src[1] & 0xFF) == 0xD8;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean isBoundsOnly(java.util.List<Object> a, int optIndex) {
+        try {
+            return a.size() > optIndex && a.get(optIndex) instanceof BitmapFactory.Options
+                    && ((BitmapFactory.Options) a.get(optIndex)).inJustDecodeBounds;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private void hookBitmapFactory(XposedModuleInterface.PackageReadyParam param) {
         try {
             for (Method method : BitmapFactory.class.getDeclaredMethods()) {
@@ -81,7 +102,8 @@ public class CaptureHook {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
                         Object[] newArgs = null;
-                        if (module.isCapturingState() && module.getMediaPath() != null) {
+                        if (module.isCapturingState() && module.getMediaPath() != null
+                                && looksLikeCaptureDecode(chain.getArgs())) {
                             // Never let a hook bug crash the host app: on any failure fall back to the original call.
                             try {
                                 int activeW = imageReaderHook.getActiveCaptureWidth();
@@ -110,7 +132,7 @@ public class CaptureHook {
                                     module.logHook("[*] Activity: Captured -> Injected into BitmapFactory#decodeByteArray (" + actualW + "x" + actualH + ")");
                                     Object[] args = chain.getArgs().toArray();
                                     args[0] = injected;
-                                    if (args.length >= 3) args[2] = injected.length;
+                                    if (args.length >= 3) { args[1] = 0; args[2] = injected.length; }
                                     newArgs = args;
                                 }
                             } catch (Throwable t) {
@@ -118,7 +140,15 @@ public class CaptureHook {
                                 newArgs = null;
                             }
                         }
-                        return newArgs != null ? chain.proceed(newArgs) : chain.proceed();
+                        if (newArgs == null) return chain.proceed();
+                        // 3-arg overload delegates to the 4-arg one: don't inject twice.
+                        boolean prev = module.isIgnoringHooks();
+                        try {
+                            module.setIgnoringHooks(true);
+                            return chain.proceed(newArgs);
+                        } finally {
+                            module.setIgnoringHooks(prev);
+                        }
                     });
                     module.logHook("[+] Hooked: BitmapFactory#decodeByteArray");
                 }
@@ -126,12 +156,18 @@ public class CaptureHook {
                 if (method.getName().equals("decodeStream") && method.getParameterTypes().length >= 1) {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
-                        if (module.isCapturingState() && module.getMediaPath() != null) {
+                        if (module.isCapturingState() && module.getMediaPath() != null
+                                && !isBoundsOnly(chain.getArgs(), 2)) {
                             int activeW = imageReaderHook.getActiveCaptureWidth();
                             int activeH = imageReaderHook.getActiveCaptureHeight();
                             int targetW = activeW > 0 ? activeW : Constants.DEFAULT_CAPTURE_WIDTH;
                             int targetH = activeH > 0 ? activeH : Constants.DEFAULT_CAPTURE_HEIGHT;
-                            byte[] injected = module.handleCapture(targetW, targetH);
+                            byte[] injected = null;
+                            try {
+                                injected = module.handleCapture(targetW, targetH);
+                            } catch (Throwable t) {
+                                module.logHook("[!] decodeStream capture failed: " + t);
+                            }
                             if (injected != null) {
                                 try {
                                     module.setIgnoringHooks(true);
@@ -150,6 +186,8 @@ public class CaptureHook {
                                         module.logHook("[*] Activity: Captured -> Injected virtual Bitmap into BitmapFactory#decodeStream (" + actualW + "x" + actualH + ")");
                                         return bitmap;
                                     }
+                                } catch (Throwable t) {
+                                    module.logHook("[!] decodeStream injection failed: " + t);
                                 } finally {
                                     module.setIgnoringHooks(false);
                                 }
@@ -168,12 +206,23 @@ public class CaptureHook {
             Method compress = Bitmap.class.getDeclaredMethod("compress", Bitmap.CompressFormat.class, int.class, OutputStream.class);
             module.hook(compress).intercept(chain -> {
                 if (module.isIgnoringHooks()) return chain.proceed();
-                if (module.isCapturingState() && module.getMediaPath() != null) {
+                boolean bigJpeg = false;
+                try {
+                    Bitmap self = (Bitmap) chain.getThisObject();
+                    bigJpeg = chain.getArgs().get(0) == Bitmap.CompressFormat.JPEG
+                            && self != null && (long) self.getWidth() * self.getHeight() >= 100_000L;
+                } catch (Throwable ignored) {}
+                if (bigJpeg && module.isCapturingState() && module.getMediaPath() != null) {
                     int activeW = imageReaderHook.getActiveCaptureWidth();
                     int activeH = imageReaderHook.getActiveCaptureHeight();
                     int targetW = activeW > 0 ? activeW : Constants.DEFAULT_CAPTURE_WIDTH;
                     int targetH = activeH > 0 ? activeH : Constants.DEFAULT_CAPTURE_HEIGHT;
-                    byte[] injected = module.handleCapture(targetW, targetH);
+                    byte[] injected = null;
+                    try {
+                        injected = module.handleCapture(targetW, targetH);
+                    } catch (Throwable t) {
+                        module.logHook("[!] compress capture failed: " + t);
+                    }
                     if (injected != null) {
                         OutputStream os = (OutputStream) chain.getArgs().get(2);
                         if (os != null) {

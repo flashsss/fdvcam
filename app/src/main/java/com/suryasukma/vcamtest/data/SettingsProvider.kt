@@ -69,11 +69,12 @@ class SettingsProvider : ContentProvider() {
         val fileName = if (path.isNotEmpty()) File(path).name else "media"
         
         val cursor = MatrixCursor(arrayOf(KEY_MEDIA_PATH, KEY_IS_ENABLED, KEY_IS_MIRRORED, KEY_ROTATION_ANGLE))
-        val videoUri = "content://$AUTHORITY/$fileName"
+        val hasMedia = path.isNotEmpty() && File(path).exists()
+        val videoUri = if (hasMedia) "content://$AUTHORITY/$fileName" else ""
         
         cursor.addRow(arrayOf(
             videoUri,
-            "1",
+            if (hasMedia) "1" else "0",
             if (prefs?.getBoolean(KEY_IS_MIRRORED, false) == true) "1" else "0",
             (prefs?.getInt(KEY_ROTATION_ANGLE, 0) ?: 0).toString()
         ))

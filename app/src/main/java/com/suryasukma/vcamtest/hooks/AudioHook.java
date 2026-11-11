@@ -61,7 +61,10 @@ public class AudioHook {
         }
     }
 
-    private void hookAudioRecordRead(XposedModuleInterface.PackageReadyParam param) {
+        // read(buf,off,len) delegates to read(buf,off,len,mode): inject only once, at the outermost call.
+    private final ThreadLocal<Boolean> inRead = ThreadLocal.withInitial(() -> false);
+
+private void hookAudioRecordRead(XposedModuleInterface.PackageReadyParam param) {
         try {
             Class<?> audioRecordClass = param.getClassLoader().loadClass("android.media.AudioRecord");
             for (Method method : audioRecordClass.getDeclaredMethods()) {
@@ -72,7 +75,10 @@ public class AudioHook {
 
                 if (params[0] == byte[].class && params[1] == int.class && params[2] == int.class) {
                     module.hook(method).intercept(chain -> {
-                        Object result = chain.proceed();
+                        if (inRead.get()) return chain.proceed();
+                        Object result;
+                        inRead.set(true);
+                        try { result = chain.proceed(); } finally { inRead.set(false); }
                         if (result instanceof Integer && (Integer) result > 0 && module.getMediaPath() != null) {
                             module.recordPipelineNode("AudioRecord(PCM)");
                             int bytesRead = (Integer) result;
@@ -88,7 +94,10 @@ public class AudioHook {
 
                 if (params[0] == short[].class && params[1] == int.class && params[2] == int.class) {
                     module.hook(method).intercept(chain -> {
-                        Object result = chain.proceed();
+                        if (inRead.get()) return chain.proceed();
+                        Object result;
+                        inRead.set(true);
+                        try { result = chain.proceed(); } finally { inRead.set(false); }
                         if (result instanceof Integer && (Integer) result > 0 && module.getMediaPath() != null) {
                             int shortsRead = (Integer) result;
                             List<Object> args = chain.getArgs();
@@ -103,7 +112,10 @@ public class AudioHook {
 
                 if (params[0] == ByteBuffer.class && params[1] == int.class) {
                     module.hook(method).intercept(chain -> {
-                        Object result = chain.proceed();
+                        if (inRead.get()) return chain.proceed();
+                        Object result;
+                        inRead.set(true);
+                        try { result = chain.proceed(); } finally { inRead.set(false); }
                         if (result instanceof Integer && (Integer) result > 0 && module.getMediaPath() != null) {
                             int bytesRead = (Integer) result;
                             List<Object> args = chain.getArgs();
