@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project
-- Repo: Testing2 (suryasukma0710-cpu/Testing2)
+- Repo: fdvcam (flashsss/fdvcam)
 - Modul Xposed kamera virtual (untuk testing), awalnya salinan persis hazbu/xCam (GPL-3.0; jaga LICENSE + atribusi).
 - Stack: Kotlin/Java, Gradle, LibXposed API 101, Android 9+.
 
