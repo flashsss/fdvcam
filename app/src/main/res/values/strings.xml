@@ -49,5 +49,34 @@
     <string name="toast_reset_done">Restored original media</string>
     <string name="label_processing">Processing…</string>
     <string name="toast_no_source">No media to edit</string>
+    <string name="nav_camera">Camera</string>
+    <string name="nav_monitor">Monitor</string>
+    <string name="label_virtual_camera">Virtual camera</string>
+    <string name="desc_enabled_on">On · apps see your media</string>
+    <string name="desc_enabled_off">Off · apps use the real camera</string>
+    <string name="desc_enabled_no_media">Choose a photo or video first</string>
+    <string name="btn_choose_media">Choose photo or video</string>
+    <string name="label_target_apps">Target apps</string>
+    <string name="label_target_apps_hint">Tap an app for actions</string>
+    <string name="label_no_target_apps">No apps selected in LSPosed scope yet</string>
+    <string name="label_tools">Tools</string>
+    <string name="btn_view_logs">View logs</string>
+    <string name="btn_about">About</string>
+    <string name="label_root_hint">Logs and Force stop use root (su) only when you tap them.</string>
+    <string name="action_open_app">Open app</string>
+    <string name="action_force_stop">Force stop (root)</string>
+    <string name="toast_force_stopped">Stopped %s</string>
+    <string name="toast_root_denied">Root access denied or unavailable</string>
+    <string name="title_logs">Logs</string>
+    <string name="btn_copy">Copy</string>
+    <string name="btn_close">Close</string>
+    <string name="label_logs_no_root">Root not available: showing this app\'s own log only. Hook logs from other apps need root (or LSPosed → Logs).</string>
+    <string name="label_logs_empty">No log lines found.</string>
+    <string name="toast_copied">Copied</string>
+    <string name="title_about">About FDVCam</string>
+    <string name="msg_about">Virtual camera module for testing camera apps.\n\nBased on xCam by hazbu (GPL-3.0). This project is distributed under the same license.</string>
+    <string name="btn_replace_media">Replace media</string>
+    <string name="msg_confirm_remove">Remove the current media and its original copy?</string>
+    <string name="action_remove">Remove</string>
 </resources>
 

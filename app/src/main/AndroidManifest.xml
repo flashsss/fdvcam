@@ -50,6 +50,7 @@
         </activity>
         <activity
             android:name=".ui.EditorActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <provider
