@@ -80,29 +80,45 @@ public class CaptureHook {
                 if (method.getName().equals("decodeByteArray")) {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
+                        Object[] newArgs = null;
                         if (module.isCapturingState() && module.getMediaPath() != null) {
-                            int activeW = imageReaderHook.getActiveCaptureWidth();
-                            int activeH = imageReaderHook.getActiveCaptureHeight();
-                            int targetW = activeW > 0 ? activeW : Constants.DEFAULT_CAPTURE_WIDTH;
-                            int targetH = activeH > 0 ? activeH : Constants.DEFAULT_CAPTURE_HEIGHT;
-                            byte[] injected = module.handleCapture(targetW, targetH);
-                            if (injected != null) {
-                                BitmapFactory.Options boundOpts = new BitmapFactory.Options();
-                                boundOpts.inJustDecodeBounds = true;
-                                BitmapFactory.decodeByteArray(injected, 0, injected.length, boundOpts);
-                                int actualW = boundOpts.outWidth > 0 ? boundOpts.outWidth : targetW;
-                                int actualH = boundOpts.outHeight > 0 ? boundOpts.outHeight : targetH;
-                                String nodeDesc = "BitmapFactory#decodeByteArray(" + actualW + "x" + actualH + ")";
-                                module.recordPipelineNode(nodeDesc);
-                                module.reportPipelineCapture(actualW, actualH, injected);
-                                module.logHook("[*] Activity: Captured -> Injected into BitmapFactory#decodeByteArray (" + actualW + "x" + actualH + ")");
-                                Object[] args = chain.getArgs().toArray();
-                                args[0] = injected;
-                                if (args.length >= 3) args[2] = injected.length;
-                                return chain.proceed(args);
+                            // Never let a hook bug crash the host app: on any failure fall back to the original call.
+                            try {
+                                int activeW = imageReaderHook.getActiveCaptureWidth();
+                                int activeH = imageReaderHook.getActiveCaptureHeight();
+                                int targetW = activeW > 0 ? activeW : Constants.DEFAULT_CAPTURE_WIDTH;
+                                int targetH = activeH > 0 ? activeH : Constants.DEFAULT_CAPTURE_HEIGHT;
+                                byte[] injected = module.handleCapture(targetW, targetH);
+                                if (injected != null) {
+                                    int actualW = targetW;
+                                    int actualH = targetH;
+                                    // Guard: decoding bounds calls decodeByteArray again, which would re-enter this hook forever.
+                                    boolean wasIgnoring = module.isIgnoringHooks();
+                                    try {
+                                        module.setIgnoringHooks(true);
+                                        BitmapFactory.Options boundOpts = new BitmapFactory.Options();
+                                        boundOpts.inJustDecodeBounds = true;
+                                        BitmapFactory.decodeByteArray(injected, 0, injected.length, boundOpts);
+                                        if (boundOpts.outWidth > 0) actualW = boundOpts.outWidth;
+                                        if (boundOpts.outHeight > 0) actualH = boundOpts.outHeight;
+                                    } finally {
+                                        module.setIgnoringHooks(wasIgnoring);
+                                    }
+                                    String nodeDesc = "BitmapFactory#decodeByteArray(" + actualW + "x" + actualH + ")";
+                                    module.recordPipelineNode(nodeDesc);
+                                    module.reportPipelineCapture(actualW, actualH, injected);
+                                    module.logHook("[*] Activity: Captured -> Injected into BitmapFactory#decodeByteArray (" + actualW + "x" + actualH + ")");
+                                    Object[] args = chain.getArgs().toArray();
+                                    args[0] = injected;
+                                    if (args.length >= 3) args[2] = injected.length;
+                                    newArgs = args;
+                                }
+                            } catch (Throwable t) {
+                                module.logHook("[!] decodeByteArray injection FAILED: " + t);
+                                newArgs = null;
                             }
                         }
-                        return chain.proceed();
+                        return newArgs != null ? chain.proceed(newArgs) : chain.proceed();
                     });
                     module.logHook("[+] Hooked: BitmapFactory#decodeByteArray");
                 }
