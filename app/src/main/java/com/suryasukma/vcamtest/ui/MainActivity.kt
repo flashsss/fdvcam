@@ -233,7 +233,7 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
             }.trim()
 
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val clip = ClipData.newPlainText("xCam Pipeline", copyText)
+            val clip = ClipData.newPlainText("FDVCam Pipeline", copyText)
             clipboard?.setPrimaryClip(clip)
             Toast.makeText(this, "Pipeline route copied to clipboard", Toast.LENGTH_SHORT).show()
         }

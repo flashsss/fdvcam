@@ -4,7 +4,7 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 
 object Logger {
-    private const val TAG = "xCam"
+    private const val TAG = "FDVCam"
 
     enum class Level(val xPriority: Int) {
         DEBUG(XposedInterface.PRIORITY_DEFAULT),

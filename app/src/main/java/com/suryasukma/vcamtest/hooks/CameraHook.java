@@ -126,7 +126,7 @@ public class CameraHook {
                 Object result = chain.proceed();
                 if (module.getMediaPath() != null && viewfinderSurface != null && viewfinderSurface.isValid()) {
                     module.recordPipelineNode("Camera1(PreviewStarted)");
-                    module.logHook("[*] Starting xCam playback for Camera1 preview surface: " + viewfinderSurface);
+                    module.logHook("[*] Starting FDVCam playback for Camera1 preview surface: " + viewfinderSurface);
                     module.handleModernPreview(viewfinderSurface);
                 }
                 return result;

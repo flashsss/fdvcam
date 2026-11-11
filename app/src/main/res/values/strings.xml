@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">xCam</string>
-    <string name="title_manager">xCam</string>
+    <string name="app_name">FDVCam</string>
+    <string name="title_manager">FDVCam</string>
     <string name="label_media_preview">Media Preview</string>
     <string name="label_none">None</string>
     <string name="btn_select_video">Select Media</string>

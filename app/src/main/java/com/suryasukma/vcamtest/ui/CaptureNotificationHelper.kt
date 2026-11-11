@@ -28,7 +28,7 @@ object CaptureNotificationHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CAPTURE_NOTIFICATION_CHANNEL_ID,
-                "xCam Capture Alerts",
+                "FDVCam Capture Alerts",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Heads-up alert when virtual photo is injected"
@@ -69,7 +69,7 @@ object CaptureNotificationHelper {
 
         val builder = NotificationCompat.Builder(context, CAPTURE_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("xCam: $appName")
+            .setContentTitle("FDVCam: $appName")
             .setContentText("Pipeline: $route")
             .setStyle(NotificationCompat.BigTextStyle().bigText(bigSummary))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
