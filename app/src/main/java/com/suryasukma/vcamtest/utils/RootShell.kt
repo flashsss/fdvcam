@@ -34,6 +34,9 @@ object RootShell {
         }
     }
 
+    /** Empties the log buffer so the next capture starts from a clean log. */
+    fun clearLogs(): Result = run("logcat -c", root = true)
+
     fun forceStop(pkg: String): Result {
         if (!isValidPackage(pkg)) return Result(false, "invalid package")
         return run("am force-stop $pkg", root = true)
@@ -41,7 +44,8 @@ object RootShell {
 
     /** Relevant log lines, from all processes when root is available. */
     fun readLogs(): Pair<Boolean, String> {
-        val filter = "grep -iE 'FDVCam|AndroidRuntime|FATAL EXCEPTION|LSPosed|Xposed|vcamtest' | tail -n 300"
+        // Hook-installation lines ("Hooked: ...") are noise: they would push the actual capture events out of view.
+        val filter = "grep -iE 'FDVCam|AndroidRuntime|FATAL EXCEPTION|LSPosed|Xposed|vcamtest' | grep -v 'Hooked:' | tail -n 400"
         val rooted = run("logcat -d -v time -t 3000 | $filter", root = true, timeoutMs = 12000L)
         if (rooted.ok) return true to rooted.output
         val own = run("logcat -d -v time -t 500 | $filter", root = false, timeoutMs = 8000L)

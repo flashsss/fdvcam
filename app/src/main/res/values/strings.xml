@@ -78,5 +78,7 @@
     <string name="btn_replace_media">Replace media</string>
     <string name="msg_confirm_remove">Remove the current media and its original copy?</string>
     <string name="action_remove">Remove</string>
+    <string name="btn_clear_logs">Clear</string>
+    <string name="toast_logs_cleared">Logs cleared</string>
 </resources>
 

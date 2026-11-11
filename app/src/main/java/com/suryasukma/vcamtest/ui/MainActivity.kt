@@ -660,6 +660,20 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
                         copyToClipboard("FDVCam logs", body)
                         Toast.makeText(this, R.string.toast_copied, Toast.LENGTH_SHORT).show()
                     }
+                    .setNeutralButton(R.string.btn_clear_logs) { _, _ ->
+                        io.execute {
+                            val r = RootShell.clearLogs()
+                            ui.post {
+                                if (!isDestroyed) {
+                                    Toast.makeText(
+                                        this,
+                                        if (r.ok) getString(R.string.toast_logs_cleared) else getString(R.string.toast_root_denied),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
                     .setNegativeButton(R.string.btn_close, null)
                     .show()
                 // Jump to the newest lines.
