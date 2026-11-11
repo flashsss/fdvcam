@@ -1,5 +1,6 @@
 package com.suryasukma.vcamtest.hooks;
 
+import android.media.AudioFormat;
 import android.media.AudioRecord;
 
 import com.suryasukma.vcamtest.xposed.XCamModule;
@@ -39,6 +40,7 @@ public class AudioHook {
             Method startRecording = audioRecordClass.getDeclaredMethod("startRecording");
             module.hook(startRecording).intercept(chain -> {
                 module.logHook("[*] Activity: AudioRecord#startRecording");
+                try { module.warmUpAudio(); } catch (Throwable t) { module.logHook("[!] Audio warm-up failed: " + t); }
                 return chain.proceed();
             });
             module.logHook("[+] Hooked: AudioRecord#startRecording");
@@ -85,7 +87,14 @@ private void hookAudioRecordRead(XposedModuleInterface.PackageReadyParam param) 
                             List<Object> args = chain.getArgs();
                             byte[] buffer = (byte[]) args.get(0);
                             int offset = (int) args.get(1);
-                            module.injectAudioBytes(buffer, offset, bytesRead);
+                            AudioRecord rec = (AudioRecord) chain.getThisObject();
+                            try {
+                                if (rec != null && rec.getAudioFormat() == AudioFormat.ENCODING_PCM_16BIT) {
+                                    module.injectAudioBytes(buffer, offset, bytesRead, rec.getSampleRate(), rec.getChannelCount());
+                                }
+                            } catch (Throwable t) {
+                                module.logHook("[!] Audio injection failed: " + t);
+                            }
                         }
                         return result;
                     });
@@ -103,7 +112,14 @@ private void hookAudioRecordRead(XposedModuleInterface.PackageReadyParam param) 
                             List<Object> args = chain.getArgs();
                             short[] buffer = (short[]) args.get(0);
                             int offset = (int) args.get(1);
-                            module.injectAudioShorts(buffer, offset, shortsRead);
+                            AudioRecord rec = (AudioRecord) chain.getThisObject();
+                            try {
+                                if (rec != null) {
+                                    module.injectAudioShorts(buffer, offset, shortsRead, rec.getSampleRate(), rec.getChannelCount());
+                                }
+                            } catch (Throwable t) {
+                                module.logHook("[!] Audio injection failed: " + t);
+                            }
                         }
                         return result;
                     });
@@ -120,7 +136,14 @@ private void hookAudioRecordRead(XposedModuleInterface.PackageReadyParam param) 
                             int bytesRead = (Integer) result;
                             List<Object> args = chain.getArgs();
                             ByteBuffer buffer = (ByteBuffer) args.get(0);
-                            module.injectAudioByteBuffer(buffer, bytesRead);
+                            AudioRecord rec = (AudioRecord) chain.getThisObject();
+                            try {
+                                if (rec != null && rec.getAudioFormat() == AudioFormat.ENCODING_PCM_16BIT) {
+                                    module.injectAudioByteBuffer(buffer, bytesRead, rec.getSampleRate(), rec.getChannelCount());
+                                }
+                            } catch (Throwable t) {
+                                module.logHook("[!] Audio injection failed: " + t);
+                            }
                         }
                         return result;
                     });

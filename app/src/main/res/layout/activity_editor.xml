@@ -180,6 +180,8 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_ed_rotate_left"
                 style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="6dp"
@@ -189,6 +191,8 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_ed_rotate_right"
                 style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="6dp"
@@ -198,6 +202,8 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_ed_flip_h"
                 style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="6dp"
@@ -207,6 +213,8 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_ed_flip_v"
                 style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="6dp"

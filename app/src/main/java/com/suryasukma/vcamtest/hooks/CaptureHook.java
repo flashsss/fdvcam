@@ -45,6 +45,9 @@ public class CaptureHook {
     }
 
     private final Map<Object, RecorderTarget> recorderTargets = new ConcurrentHashMap<>();
+    // Recorders that declared a video source: audio-only recorders (voice notes) must never get video written over them.
+    private final java.util.Set<Object> videoRecorders =
+            java.util.Collections.newSetFromMap(java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>()));
     private volatile RecorderTarget lastRecorderTarget;
     private volatile long lastStartMediaPosMs = 0;
     private volatile long lastStartWallClockMs = 0;
@@ -361,7 +364,7 @@ public class CaptureHook {
         if (recorder != null) {
             target = recorderTargets.get(recorder);
         }
-        if (target == null) {
+        if (target == null && recorder == null) {
             target = lastRecorderTarget;
         }
         if (target != null) {
@@ -372,11 +375,17 @@ public class CaptureHook {
     }
 
     private void replaceMediaRecorderOutput(Object recorder) {
+        if (recorder != null && !videoRecorders.contains(recorder)) {
+            recorderTargets.remove(recorder);
+            module.logHook("[*] MediaRecorder#stop: no video source declared, skipping replacement");
+            return;
+        }
         RecorderTarget target = null;
         if (recorder != null) {
             target = recorderTargets.remove(recorder);
         }
-        if (target == null) {
+        // Only fall back to the last known output when we cannot tell which recorder this is.
+        if (target == null && recorder == null) {
             target = lastRecorderTarget;
             lastRecorderTarget = null;
         }
@@ -523,6 +532,17 @@ public class CaptureHook {
                 }
             }
 
+            for (Method m : mrClass.getDeclaredMethods()) {
+                if (m.getName().equals("setVideoSource")) {
+                    module.hook(m).intercept(chain -> {
+                        Object recorder = chain.getThisObject();
+                        if (recorder != null) videoRecorders.add(recorder);
+                        return chain.proceed();
+                    });
+                    module.logHook("[+] Hooked: MediaRecorder#setVideoSource");
+                }
+            }
+
             Method startMethod = mrClass.getDeclaredMethod("start");
             module.hook(startMethod).intercept(chain -> {
                 Object recorder = chain.getThisObject();
@@ -553,6 +573,7 @@ public class CaptureHook {
                         Object recorder = chain.getThisObject();
                         if (recorder != null) {
                             recorderTargets.remove(recorder);
+                            videoRecorders.remove(recorder);
                         }
                         return chain.proceed();
                     });

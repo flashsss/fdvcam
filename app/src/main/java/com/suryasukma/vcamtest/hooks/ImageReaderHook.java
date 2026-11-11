@@ -242,12 +242,28 @@ public class ImageReaderHook {
         }
     }
 
+    private final java.util.concurrent.ConcurrentHashMap<Long, String[]> flowStringCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private String[] flowStrings(int w, int h, int format) {
+        long k = (((long) w) << 40) ^ (((long) h) << 16) ^ format;
+        String[] v = flowStringCache.get(k);
+        if (v == null) {
+            String sf = getShortFormatName(format);
+            v = new String[]{w + "x" + h + "_" + format, "ImageReader(" + w + "x" + h + " " + sf + ")", sf};
+            flowStringCache.put(k, v);
+        }
+        return v;
+    }
+
     private void processAcquiredImage(ImageReader reader, Image image) {
         int w = reader.getWidth();
         int h = reader.getHeight();
         int format = reader.getImageFormat();
-        String key = w + "x" + h + "_" + format;
-        String shortFmt = getShortFormatName(format);
+        // Called for every acquired frame: reuse the strings instead of rebuilding them each time.
+        String[] fs = flowStrings(w, h, format);
+        String key = fs[0];
+        String node = fs[1];
 
         if (w > 0 && h > 0) {
             if (format == ImageFormat.JPEG || activeCaptureWidth == 0 || activeCaptureHeight == 0) {
@@ -263,7 +279,7 @@ public class ImageReaderHook {
         }
 
         if (module.getMediaPath() != null && format == ImageFormat.YUV_420_888) {
-            module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
+            module.recordPipelineNode(node);
             try {
                 module.injectYuvFrame(image, w, h);
             } catch (Throwable t) {
@@ -290,7 +306,7 @@ public class ImageReaderHook {
                             buffer.put(replacement);
                             buffer.limit(replacement.length);
                             buffer.rewind();
-                            module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
+                            module.recordPipelineNode(node);
                             module.reportPipelineCapture(w, h, replacement);
                             module.logHook("[+] Activity: ImageReader JPEG replaced successfully (" + replacement.length + " bytes)");
                             module.consumeInjectionToken();
@@ -301,7 +317,7 @@ public class ImageReaderHook {
                 module.logHook("[!] Failed to inject JPEG: " + t.getMessage());
             }
         } else if (format == 0x1) {
-            module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
+            module.recordPipelineNode(node);
         }
     }
 }

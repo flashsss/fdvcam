@@ -36,7 +36,8 @@ public class CameraHook {
         synchronized (dummyTextures) {
             SurfaceTexture st = dummyTextures.get(camera);
             if (st == null) {
-                st = new SurfaceTexture(10);
+                st = com.suryasukma.vcamtest.core.surface.TextureDrain.INSTANCE.create();
+                if (st == null) st = new SurfaceTexture(10); // EGL unavailable: undrained fallback
                 dummyTextures.put(camera, st);
             }
             return st;
@@ -45,7 +46,7 @@ public class CameraHook {
 
     private void releaseDummyFor(Camera camera) {
         SurfaceTexture st = dummyTextures.remove(camera);
-        if (st != null) { try { st.release(); } catch (Throwable ignored) {} }
+        com.suryasukma.vcamtest.core.surface.TextureDrain.INSTANCE.release(st);
     }
 
     public CameraHook(XCamModule module) {

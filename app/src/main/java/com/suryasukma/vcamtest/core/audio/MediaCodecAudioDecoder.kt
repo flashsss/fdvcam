@@ -23,8 +23,6 @@ class MediaCodecAudioDecoder(
     private var decodeThread: Thread? = null
 
     private val pcmQueue = ConcurrentLinkedQueue<ByteArray>()
-    private var currentPcmChunk: ByteArray? = null
-    private var currentPcmOffset = 0
 
     @Volatile
     var sampleRate = 44100
@@ -37,7 +35,7 @@ class MediaCodecAudioDecoder(
     fun start() {
         if (isRunning) return
         isRunning = true
-        decodeThread = Thread({ decodeLoop() }, "xCam-AudioDecoder").apply {
+        decodeThread = Thread({ decodeLoop() }, "FDVCam-AudioDecoder").apply {
             isDaemon = true
             start()
         }
@@ -47,12 +45,11 @@ class MediaCodecAudioDecoder(
         isRunning = false
         decodeThread?.interrupt()
         try {
-            decodeThread?.join(500)
+            decodeThread?.join(150)
         } catch (_: InterruptedException) {}
         decodeThread = null
         pcmQueue.clear()
-        currentPcmChunk = null
-        currentPcmOffset = 0
+        converter.reset()
     }
 
     private fun decodeLoop() {
@@ -149,45 +146,19 @@ class MediaCodecAudioDecoder(
         }
     }
 
-    /**
-     * Reads decoded PCM audio bytes into target buffer.
-     * Returns true if replaced, or false if queue is empty.
-     */
-    fun readBytes(target: ByteArray, offset: Int, length: Int): Boolean {
-        var written = 0
-        while (written < length) {
-            if (currentPcmChunk == null || currentPcmOffset >= (currentPcmChunk?.size ?: 0)) {
-                currentPcmChunk = pcmQueue.poll()
-                currentPcmOffset = 0
-                if (currentPcmChunk == null) break
-            }
+    private val converter = PcmConverter({ pcmQueue.poll() }, { sampleRate }, { channelCount })
 
-            val chunk = currentPcmChunk ?: break
-            val available = chunk.size - currentPcmOffset
-            val toCopy = min(length - written, available)
+    private fun readPcm16(target: ByteArray, offset: Int, lengthBytes: Int, targetRate: Int, targetChannels: Int): Boolean =
+        converter.read(target, offset, lengthBytes, targetRate, targetChannels)
 
-            System.arraycopy(chunk, currentPcmOffset, target, offset + written, toCopy)
-            currentPcmOffset += toCopy
-            written += toCopy
-        }
+    /** Reads decoded audio as 16-bit little-endian bytes (see [readPcm16]). */
+    fun readBytes(target: ByteArray, offset: Int, length: Int, targetRate: Int, targetChannels: Int): Boolean =
+        readPcm16(target, offset, length, targetRate, targetChannels)
 
-        if (written > 0) {
-            if (written < length) {
-                target.fill(0, offset + written, offset + length)
-            }
-            return true
-        }
-        return false
-    }
-
-    /**
-     * Reads decoded PCM audio as 16-bit shorts into target buffer.
-     */
-    fun readShorts(target: ShortArray, offset: Int, length: Int): Boolean {
-        val byteLen = length * 2
-        val tempBytes = ByteArray(byteLen)
-        if (!readBytes(tempBytes, 0, byteLen)) return false
-
+    /** Reads decoded audio as 16-bit shorts. */
+    fun readShorts(target: ShortArray, offset: Int, length: Int, targetRate: Int, targetChannels: Int): Boolean {
+        val tempBytes = ByteArray(length * 2)
+        if (!readPcm16(tempBytes, 0, tempBytes.size, targetRate, targetChannels)) return false
         for (i in 0 until length) {
             val low = tempBytes[i * 2].toInt() and 0xFF
             val high = tempBytes[i * 2 + 1].toInt()
@@ -196,14 +167,14 @@ class MediaCodecAudioDecoder(
         return true
     }
 
-    /**
-     * Reads decoded PCM audio directly into ByteBuffer.
-     */
-    fun readByteBuffer(target: ByteBuffer, length: Int): Boolean {
-        val tempBytes = ByteArray(length)
-        if (!readBytes(tempBytes, 0, length)) return false
+    /** Reads decoded audio directly into a ByteBuffer (position is left unchanged, like AudioRecord does). */
+    fun readByteBuffer(target: ByteBuffer, length: Int, targetRate: Int, targetChannels: Int): Boolean {
+        val n = length.coerceAtMost(target.remaining())
+        if (n <= 0) return false
+        val tempBytes = ByteArray(n)
+        if (!readPcm16(tempBytes, 0, n, targetRate, targetChannels)) return false
         val currentPos = target.position()
-        target.put(tempBytes, 0, length.coerceAtMost(target.remaining()))
+        target.put(tempBytes, 0, n)
         target.position(currentPos)
         return true
     }

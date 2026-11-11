@@ -194,6 +194,8 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_delete_media"
                     style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                     android:contentDescription="@string/action_remove"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -277,6 +279,8 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_rotate_left"
                         style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginHorizontal="6dp"
@@ -286,6 +290,8 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_mirror"
                         style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginHorizontal="6dp"
@@ -295,6 +301,8 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_rotate_right"
                         style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                        android:minWidth="48dp"
+                        android:minHeight="48dp"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginHorizontal="6dp"

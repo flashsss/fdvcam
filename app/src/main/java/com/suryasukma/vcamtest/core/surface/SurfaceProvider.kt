@@ -17,13 +17,15 @@ class SurfaceProvider(private val logAction: (String) -> Unit) {
     fun getDummySurface(): Surface {
         if ((dummySurface == null) || !dummySurface!!.isValid) {
             log("Creating new dummy surface")
-            val st = SurfaceTexture(DUMMY_SURFACE_TEXTURE_ID).apply {
-                setOnFrameAvailableListener { 
-                    try { updateTexImage() } catch (_: Exception) {} 
+            val st = TextureDrain.create() ?: SurfaceTexture(DUMMY_SURFACE_TEXTURE_ID).apply {
+                // EGL unavailable: best effort, frames cannot be drained.
+                setOnFrameAvailableListener {
+                    try { updateTexImage() } catch (_: Exception) {}
                 }
+                try { detachFromGLContext() } catch (_: Throwable) {}
             }
-            try { st.detachFromGLContext() } catch (_: Throwable) {}
-            dummyST?.release()
+            dummySurface?.release()
+            TextureDrain.release(dummyST)
             dummyST = st
             dummySurface = Surface(st)
         }
@@ -33,7 +35,7 @@ class SurfaceProvider(private val logAction: (String) -> Unit) {
     @Synchronized
     fun release() {
         dummySurface?.release()
-        dummyST?.release()
+        TextureDrain.release(dummyST)
         dummySurface = null
         dummyST = null
     }

@@ -6,13 +6,17 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.os.SystemClock
 import androidx.core.net.toUri
-import java.nio.ByteBuffer
 
 /**
- * Lightweight hardware MediaCodec-based video decoder that outputs raw YUV_420_888 frames
- * directly, avoiding CPU-heavy Bitmap and JPEG conversion loops.
- * Aligned with CamSwap's high-speed YUV pump architecture.
+ * MediaCodec-based video decoder that outputs raw YUV_420_888 frames directly, avoiding CPU-heavy Bitmap and JPEG
+ * conversion loops.
+ *
+ * Designed to be light inside a host app process:
+ *  - frame buffers are pooled (no per-frame allocation),
+ *  - playback is paced by the video's own timestamps,
+ *  - decoding pauses while nobody has read a frame for [IDLE_AFTER_MS].
  */
 class MediaCodecYuvDecoder(
     private val context: Context,
@@ -28,13 +32,25 @@ class MediaCodecYuvDecoder(
         val timestampNs: Long
     )
 
+    private class Buffers(val width: Int, val height: Int) {
+        val y = ByteArray(width * height)
+        val u = ByteArray(((width + 1) / 2) * ((height + 1) / 2))
+        val v = ByteArray(u.size)
+    }
+
     @Volatile
     private var isRunning = false
     private var decodeThread: Thread? = null
 
-    @Volatile
-    var latestFrame: YuvFrame? = null
-        private set
+    @Volatile private var latest: YuvFrame? = null
+    @Volatile private var lastReadMs = 0L
+
+    /** Latest decoded frame. Reading it tells the decoder that somebody is still consuming frames. */
+    val latestFrame: YuvFrame?
+        get() {
+            lastReadMs = SystemClock.elapsedRealtime()
+            return latest
+        }
 
     @Volatile
     var videoWidth = 0
@@ -44,10 +60,15 @@ class MediaCodecYuvDecoder(
     var videoHeight = 0
         private set
 
+    // A few rotating buffers: a consumer may still be copying frame N while frame N+1 is being written.
+    private val pool = arrayOfNulls<Buffers>(POOL_SIZE)
+    private var poolIndex = 0
+
     fun start() {
         if (isRunning) return
         isRunning = true
-        decodeThread = Thread({ decodeLoop() }, "xCam-YuvDecoder").apply {
+        lastReadMs = SystemClock.elapsedRealtime()
+        decodeThread = Thread({ decodeLoop() }, "FDVCam-YuvDecoder").apply {
             isDaemon = true
             start()
         }
@@ -60,7 +81,7 @@ class MediaCodecYuvDecoder(
             decodeThread?.join(150)
         } catch (_: InterruptedException) {}
         decodeThread = null
-        latestFrame = null
+        latest = null
     }
 
     private fun decodeLoop() {
@@ -107,55 +128,64 @@ class MediaCodecYuvDecoder(
 
             val bufferInfo = MediaCodec.BufferInfo()
             val timeoutUs = 10_000L
-            var isInputEos = false
 
-            val frameDurationMs = 1000L / (videoFormat.runCatching { getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull() ?: 30).coerceAtLeast(15)
+            // Wall-clock <-> presentation-time mapping used for pacing.
+            var baseWallNs = 0L
+            var basePtsUs = 0L
+            var lastPtsUs = Long.MIN_VALUE
+            var needRebase = true
 
             while (isRunning) {
-                val loopStartMs = System.currentTimeMillis()
+                // Nobody is reading frames: stop burning CPU/battery until somebody does.
+                if (SystemClock.elapsedRealtime() - lastReadMs > IDLE_AFTER_MS) {
+                    Thread.sleep(IDLE_POLL_MS)
+                    needRebase = true
+                    continue
+                }
 
-                if (!isInputEos) {
-                    val inIndex = codec.dequeueInputBuffer(timeoutUs)
-                    if (inIndex >= 0) {
-                        val inputBuffer = codec.getInputBuffer(inIndex)
-                        if (inputBuffer != null) {
-                            var sampleSize = extractor.readSampleData(inputBuffer, 0)
-                            if (sampleSize < 0) {
-                                extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                                sampleSize = extractor.readSampleData(inputBuffer, 0)
-                            }
+                val inIndex = codec.dequeueInputBuffer(timeoutUs)
+                if (inIndex >= 0) {
+                    val inputBuffer = codec.getInputBuffer(inIndex)
+                    if (inputBuffer != null) {
+                        var sampleSize = extractor.readSampleData(inputBuffer, 0)
+                        if (sampleSize < 0) {
+                            extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                            sampleSize = extractor.readSampleData(inputBuffer, 0)
+                        }
 
-                            if (sampleSize > 0) {
-                                codec.queueInputBuffer(
-                                    inIndex,
-                                    0,
-                                    sampleSize,
-                                    extractor.sampleTime,
-                                    0
-                                )
-                                extractor.advance()
-                            } else {
-                                codec.queueInputBuffer(inIndex, 0, 0, 0, 0)
-                            }
+                        if (sampleSize > 0) {
+                            codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+                            extractor.advance()
+                        } else {
+                            codec.queueInputBuffer(inIndex, 0, 0, 0, 0)
                         }
                     }
                 }
 
                 val outIndex = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
                 if (outIndex >= 0) {
+                    val ptsUs = bufferInfo.presentationTimeUs
+                    // The clip looped (timestamps went backwards) or decoding resumed: restart the timeline.
+                    if (needRebase || ptsUs < lastPtsUs - 100_000L) {
+                        baseWallNs = System.nanoTime()
+                        basePtsUs = ptsUs
+                        needRebase = false
+                    }
+                    lastPtsUs = ptsUs
+
+                    val dueNs = baseWallNs + (ptsUs - basePtsUs) * 1000L
+                    val waitMs = (dueNs - System.nanoTime()) / 1_000_000L
+                    if (waitMs > 0) Thread.sleep(minOf(waitMs, MAX_FRAME_WAIT_MS))
+
                     val image: Image? = codec.getOutputImage(outIndex)
                     if (image != null) {
-                        val frame = extractYuvFrame(image)
-                        latestFrame = frame
-                        image.close()
+                        try {
+                            latest = extractYuvFrame(image)
+                        } finally {
+                            image.close()
+                        }
                     }
                     codec.releaseOutputBuffer(outIndex, false)
-                }
-
-                val elapsedMs = System.currentTimeMillis() - loopStartMs
-                val sleepMs = frameDurationMs - elapsedMs
-                if (sleepMs > 0) {
-                    Thread.sleep(sleepMs)
                 }
             }
         } catch (_: InterruptedException) {
@@ -168,66 +198,62 @@ class MediaCodecYuvDecoder(
         }
     }
 
+    private fun nextBuffers(width: Int, height: Int): Buffers {
+        poolIndex = (poolIndex + 1) % POOL_SIZE
+        val existing = pool[poolIndex]
+        if (existing != null && existing.width == width && existing.height == height) return existing
+        return Buffers(width, height).also { pool[poolIndex] = it }
+    }
+
     private fun extractYuvFrame(image: Image): YuvFrame {
         val width = image.width
         val height = image.height
         val planes = image.planes
-
-        val ySize = width * height
         val cw = (width + 1) / 2
         val ch = (height + 1) / 2
-        val uvSize = cw * ch
 
-        val yBytes = ByteArray(ySize)
-        val uBytes = ByteArray(uvSize)
-        val vBytes = ByteArray(uvSize)
+        val buffers = nextBuffers(width, height)
+        copyPlane(planes[0], width, height, buffers.y)
+        copyPlane(planes[1], cw, ch, buffers.u)
+        copyPlane(planes[2], cw, ch, buffers.v)
+        return YuvFrame(width, height, buffers.y, buffers.u, buffers.v, System.nanoTime())
+    }
 
-        // Y plane
-        val yPlane = planes[0]
-        val yBuf = yPlane.buffer.duplicate()
-        val yRowStride = yPlane.rowStride
-        val yPixelStride = yPlane.pixelStride
-        val yPos = yBuf.position()
+    /** Copies one image plane into a tightly packed array, using bulk row copies whenever the layout allows. */
+    private fun copyPlane(plane: Image.Plane, w: Int, h: Int, dst: ByteArray) {
+        val buf = plane.buffer.duplicate()
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val start = buf.position()
 
-        if (yPixelStride == 1 && yRowStride == width) {
-            yBuf.get(yBytes, 0, minOf(yBytes.size, yBuf.remaining()))
+        if (pixelStride == 1) {
+            if (rowStride == w) {
+                buf.get(dst, 0, minOf(dst.size, buf.remaining()))
+            } else {
+                for (row in 0 until h) {
+                    buf.position(start + row * rowStride)
+                    val n = minOf(w, buf.remaining())
+                    if (n <= 0) break
+                    buf.get(dst, row * w, n)
+                }
+            }
         } else {
-            for (row in 0 until height) {
-                val rowStart = yPos + row * yRowStride
-                val dstBase = row * width
-                for (col in 0 until width) {
-                    yBytes[dstBase + col] = yBuf.get(rowStart + col * yPixelStride)
+            for (row in 0 until h) {
+                val rowStart = start + row * rowStride
+                val dstBase = row * w
+                for (col in 0 until w) {
+                    val idx = rowStart + col * pixelStride
+                    if (idx >= buf.limit()) return
+                    dst[dstBase + col] = buf.get(idx)
                 }
             }
         }
+    }
 
-        // U and V planes
-        val uPlane = planes[1]
-        val vPlane = planes[2]
-        val uBuf = uPlane.buffer.duplicate()
-        val vBuf = vPlane.buffer.duplicate()
-        val uRowStride = uPlane.rowStride
-        val uPixelStride = uPlane.pixelStride
-        val vRowStride = vPlane.rowStride
-        val vPixelStride = vPlane.pixelStride
-        val uPos = uBuf.position()
-        val vPos = vBuf.position()
-
-        if (uPixelStride == 1 && vPixelStride == 1 && uRowStride == cw && vRowStride == cw) {
-            uBuf.get(uBytes, 0, minOf(uBytes.size, uBuf.remaining()))
-            vBuf.get(vBytes, 0, minOf(vBytes.size, vBuf.remaining()))
-        } else {
-            for (row in 0 until ch) {
-                val uRowStart = uPos + row * uRowStride
-                val vRowStart = vPos + row * vRowStride
-                val dstBase = row * cw
-                for (col in 0 until cw) {
-                    uBytes[dstBase + col] = uBuf.get(uRowStart + col * uPixelStride)
-                    vBytes[dstBase + col] = vBuf.get(vRowStart + col * vPixelStride)
-                }
-            }
-        }
-
-        return YuvFrame(width, height, yBytes, uBytes, vBytes, System.nanoTime())
+    private companion object {
+        const val POOL_SIZE = 3
+        const val IDLE_AFTER_MS = 1500L
+        const val IDLE_POLL_MS = 40L
+        const val MAX_FRAME_WAIT_MS = 200L
     }
 }

@@ -68,7 +68,7 @@ object CaptureNotificationHelper {
         val bigSummary = "App: $appName ($packageName)\nPipeline: $route\nSize: $resolutionText"
 
         val builder = NotificationCompat.Builder(context, CAPTURE_NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setSmallIcon(R.drawable.ic_stat_fdvcam)
             .setContentTitle("FDVCam: $appName")
             .setContentText("Pipeline: $route")
             .setStyle(NotificationCompat.BigTextStyle().bigText(bigSummary))

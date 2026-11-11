@@ -190,6 +190,7 @@ class CropOverlayView @JvmOverloads constructor(
             if (h > maxH) { h = maxH; w = h * a }
             if (movingLeft) l = r - w else r = l + w
             if (movingTop) t = b - h else b = t + h
+            if (r - l < minSize || b - t < minSize) return // would end up smaller than the minimum: ignore this move
         }
         crop.set(l, t, r, b)
     }

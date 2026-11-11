@@ -69,7 +69,17 @@ class XCamModule : XposedModule() {
                 lastSettingsRefreshMs = now
                 refreshInFlight = true
                 Thread({
-                    try { settings.refreshSettings(ctx) } catch (_: Throwable) {} finally { refreshInFlight = false }
+                    try {
+                        val before = settings.mediaPath
+                        settings.refreshSettings(ctx)
+                        // Master switch turned off (or media removed) while the engine is playing: stop injecting.
+                        if (before != null && settings.mediaPath == null) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post { stopEngine() }
+                        }
+                    } catch (_: Throwable) {
+                    } finally {
+                        refreshInFlight = false
+                    }
                 }, "FDVCam-Settings").apply { isDaemon = true }.start()
             }
             return settings.mediaPath
@@ -182,22 +192,29 @@ class XCamModule : XposedModule() {
     fun handleModernPreview(s: Surface) = engine.handleModernPreview(s)
     fun getDummySurface() = engine.getDummySurface()
 
-    fun injectAudioBytes(buffer: ByteArray, offset: Int, length: Int) {
+    /** Starts the audio decoder ahead of the first AudioRecord#read so the audio thread never waits for it. */
+    fun warmUpAudio() {
         val path = settings.mediaPath ?: return
         val ctx = mContext ?: return
-        getOrCreateAudioDecoder(ctx, path).readBytes(buffer, offset, length)
+        getOrCreateAudioDecoder(ctx, path)
     }
 
-    fun injectAudioShorts(buffer: ShortArray, offset: Int, length: Int) {
+    fun injectAudioBytes(buffer: ByteArray, offset: Int, length: Int, sampleRate: Int, channels: Int) {
         val path = settings.mediaPath ?: return
         val ctx = mContext ?: return
-        getOrCreateAudioDecoder(ctx, path).readShorts(buffer, offset, length)
+        getOrCreateAudioDecoder(ctx, path).readBytes(buffer, offset, length, sampleRate, channels)
     }
 
-    fun injectAudioByteBuffer(buffer: java.nio.ByteBuffer, length: Int) {
+    fun injectAudioShorts(buffer: ShortArray, offset: Int, length: Int, sampleRate: Int, channels: Int) {
         val path = settings.mediaPath ?: return
         val ctx = mContext ?: return
-        getOrCreateAudioDecoder(ctx, path).readByteBuffer(buffer, length)
+        getOrCreateAudioDecoder(ctx, path).readShorts(buffer, offset, length, sampleRate, channels)
+    }
+
+    fun injectAudioByteBuffer(buffer: java.nio.ByteBuffer, length: Int, sampleRate: Int, channels: Int) {
+        val path = settings.mediaPath ?: return
+        val ctx = mContext ?: return
+        getOrCreateAudioDecoder(ctx, path).readByteBuffer(buffer, length, sampleRate, channels)
     }
 
     fun getImageReaderCaptureWidth(): Int = injectors.imageReaderHook.activeCaptureWidth

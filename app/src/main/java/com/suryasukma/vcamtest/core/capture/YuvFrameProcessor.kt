@@ -9,6 +9,7 @@ import androidx.core.graphics.scale
  * for injection into camera streams.
  */
 class YuvFrameProcessor {
+    private val nv21Buffer = ThreadLocal<ByteArray?>()
     private var cachedSource: ByteArray? = null
     private var cachedYuv: YuvData? = null
 
@@ -23,7 +24,9 @@ class YuvFrameProcessor {
     fun frameToNv21(frame: MediaCodecYuvDecoder.YuvFrame, targetWidth: Int, targetHeight: Int): ByteArray {
         val ySize = targetWidth * targetHeight
         val totalSize = ySize + ySize / 2
-        val nv21 = ByteArray(totalSize)
+        // The caller copies the result right away on the same (camera callback) thread, so one buffer per thread
+        // is enough and avoids allocating ~3 MB per preview frame.
+        val nv21 = nv21Buffer.get()?.takeIf { it.size == totalSize } ?: ByteArray(totalSize).also { nv21Buffer.set(it) }
 
         val srcW = frame.width
         val srcH = frame.height
@@ -43,13 +46,13 @@ class YuvFrameProcessor {
         }
 
         // Resample Y plane directly into target bounds
+        val xMap = IntArray(targetWidth) { (it * srcW) / targetWidth }
         for (y in 0 until targetHeight) {
             val srcY = (y * srcH) / targetHeight
             val srcYOffset = srcY * srcW
             val dstYOffset = y * targetWidth
             for (x in 0 until targetWidth) {
-                val srcX = (x * srcW) / targetWidth
-                val srcIdx = srcYOffset + srcX
+                val srcIdx = srcYOffset + xMap[x]
                 if (srcIdx < frame.yPlane.size) {
                     nv21[dstYOffset + x] = frame.yPlane[srcIdx]
                 }
@@ -63,12 +66,12 @@ class YuvFrameProcessor {
         val srcChromaH = (srcH + 1) / 2
         var uvDstIdx = ySize
 
+        val cMap = IntArray(targetChromaW) { (it * srcChromaW) / targetChromaW }
         for (row in 0 until targetChromaH) {
             val srcRow = (row * srcChromaH) / targetChromaH
             val srcRowOffset = srcRow * srcChromaW
             for (col in 0 until targetChromaW) {
-                val srcCol = (col * srcChromaW) / targetChromaW
-                val srcIdx = srcRowOffset + srcCol
+                val srcIdx = srcRowOffset + cMap[col]
                 if (uvDstIdx + 1 < totalSize) {
                     val vByte = if (srcIdx < frame.vPlane.size) frame.vPlane[srcIdx] else 128.toByte()
                     val uByte = if (srcIdx < frame.uPlane.size) frame.uPlane[srcIdx] else 128.toByte()
@@ -149,66 +152,45 @@ class YuvFrameProcessor {
             return
         }
 
-        // Resample Y plane directly into image plane 0
-        val yPlane = planes[0]
-        val yBuf = yPlane.buffer ?: return
-        val yRowStride = yPlane.rowStride
-        val yPixelStride = yPlane.pixelStride
-        val yStart = yBuf.position()
-        val yLimit = yBuf.limit()
+        val cw = (dstW + 1) / 2
+        val ch = (dstH + 1) / 2
+        val scw = (srcW + 1) / 2
+        val sch = (srcH + 1) / 2
+        resamplePlane(frame.yPlane, srcW, srcH, planes[0], dstW, dstH)
+        resamplePlane(frame.uPlane, scw, sch, planes[1], cw, ch)
+        resamplePlane(frame.vPlane, scw, sch, planes[2], cw, ch)
+    }
+
+    /**
+     * Nearest-neighbour scales [src] (srcW x srcH, tightly packed) into an image plane of dstW x dstH.
+     * The column mapping is computed once; rows are written with bulk puts when the plane is contiguous.
+     */
+    private fun resamplePlane(src: ByteArray, srcW: Int, srcH: Int, plane: Image.Plane, dstW: Int, dstH: Int) {
+        val buf = plane.buffer?.duplicate() ?: return
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val start = buf.position()
+        val limit = buf.limit()
+        val xMap = IntArray(dstW) { (it * srcW) / dstW }
+        val row = ByteArray(dstW)
 
         for (y in 0 until dstH) {
-            val srcY = (y * srcH) / dstH
-            val srcRowOffset = srcY * srcW
-            val dstRowOffset = yStart + y * yRowStride
-            for (x in 0 until dstW) {
-                val srcX = (x * srcW) / dstW
-                val srcIdx = srcRowOffset + srcX
-                val dstIdx = dstRowOffset + x * yPixelStride
-                if (dstIdx < yLimit && srcIdx < frame.yPlane.size) {
-                    yBuf.put(dstIdx, frame.yPlane[srcIdx])
+            val srcRowOffset = ((y * srcH) / dstH) * srcW
+            val dstRowOffset = start + y * rowStride
+            if (dstRowOffset >= limit) break
+            if (pixelStride == 1) {
+                val n = minOf(dstW, limit - dstRowOffset)
+                for (x in 0 until n) {
+                    val si = srcRowOffset + xMap[x]
+                    row[x] = if (si < src.size) src[si] else 0
                 }
-            }
-        }
-
-        // Resample U and V planes
-        val dstChromaW = (dstW + 1) / 2
-        val dstChromaH = (dstH + 1) / 2
-        val srcChromaW = (srcW + 1) / 2
-        val srcChromaH = (srcH + 1) / 2
-
-        val uPlane = planes[1]
-        val uBuf = uPlane.buffer ?: return
-        val uRowStride = uPlane.rowStride
-        val uPixelStride = uPlane.pixelStride
-        val uStart = uBuf.position()
-        val uLimit = uBuf.limit()
-
-        val vPlane = planes[2]
-        val vBuf = vPlane.buffer ?: return
-        val vRowStride = vPlane.rowStride
-        val vPixelStride = vPlane.pixelStride
-        val vStart = vBuf.position()
-        val vLimit = vBuf.limit()
-
-        for (row in 0 until dstChromaH) {
-            val srcRow = (row * srcChromaH) / dstChromaH
-            val srcRowOffset = srcRow * srcChromaW
-            val uDstRowOffset = uStart + row * uRowStride
-            val vDstRowOffset = vStart + row * vRowStride
-
-            for (col in 0 until dstChromaW) {
-                val srcCol = (col * srcChromaW) / dstChromaW
-                val srcIdx = srcRowOffset + srcCol
-
-                val uDstIdx = uDstRowOffset + col * uPixelStride
-                if (uDstIdx < uLimit && srcIdx < frame.uPlane.size) {
-                    uBuf.put(uDstIdx, frame.uPlane[srcIdx])
-                }
-
-                val vDstIdx = vDstRowOffset + col * vPixelStride
-                if (vDstIdx < vLimit && srcIdx < frame.vPlane.size) {
-                    vBuf.put(vDstIdx, frame.vPlane[srcIdx])
+                buf.position(dstRowOffset)
+                buf.put(row, 0, n)
+            } else {
+                for (x in 0 until dstW) {
+                    val di = dstRowOffset + x * pixelStride
+                    val si = srcRowOffset + xMap[x]
+                    if (di < limit && si < src.size) buf.put(di, src[si])
                 }
             }
         }
@@ -282,7 +264,7 @@ class YuvFrameProcessor {
     }
 
     private fun writePlane(plane: Image.Plane, values: ByteArray, width: Int, height: Int) {
-        val buffer = plane.buffer ?: return
+        val buffer = plane.buffer?.duplicate() ?: return
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
         val start = buffer.position()
@@ -291,11 +273,16 @@ class YuvFrameProcessor {
         for (row in 0 until height) {
             val dstRow = start + row * rowStride
             val srcRow = row * width
-            for (col in 0 until width) {
-                val dstIdx = dstRow + col * pixelStride
-                val srcIdx = srcRow + col
-                if (dstIdx < limit && srcIdx < values.size) {
-                    buffer.put(dstIdx, values[srcIdx])
+            if (dstRow >= limit || srcRow >= values.size) break
+            if (pixelStride == 1) {
+                val n = minOf(width, limit - dstRow, values.size - srcRow)
+                buffer.position(dstRow)
+                buffer.put(values, srcRow, n)
+            } else {
+                for (col in 0 until width) {
+                    val dstIdx = dstRow + col * pixelStride
+                    val srcIdx = srcRow + col
+                    if (dstIdx < limit && srcIdx < values.size) buffer.put(dstIdx, values[srcIdx])
                 }
             }
         }

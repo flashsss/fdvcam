@@ -117,7 +117,7 @@ object MediaRemuxer {
             var timedOut = false
 
             while (!encoderOutputEos) {
-                if (System.currentTimeMillis() - loopStartTimeMs > 6000) {
+                if (System.currentTimeMillis() - loopStartTimeMs > 3500) {
                     logAction?.invoke("[TRANSCODE] Loop timed out")
                     timedOut = true
                     break

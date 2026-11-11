@@ -11,7 +11,7 @@ object Constants {
     const val DEFAULT_CAPTURE_HEIGHT = 1280
     const val DUMMY_SURFACE_TEXTURE_ID = 999
     const val MIN_SESSION_DEBOUNCE_MS = 100L
-    const val STREAM_FRAME_INTERVAL_MS = 33L
+    const val STREAM_FRAME_INTERVAL_MS = 250L // only used until the first decoded frame is available
     const val KEY_ENABLE_CAPTURE_NOTIF = "enable_capture_notif"
     const val KEY_LATEST_PIPELINE_APP = "latest_pipeline_app"
     const val KEY_LATEST_PIPELINE_ROUTE = "latest_pipeline_route"

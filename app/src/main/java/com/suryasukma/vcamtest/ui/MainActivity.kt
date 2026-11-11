@@ -465,7 +465,7 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
                 val retriever = MediaMetadataRetriever()
                 try {
                     retriever.setDataSource(file.absolutePath)
-                    bitmap = retriever.getFrameAtTime(1_000_000)
+                    bitmap = retriever.getFrameAtTime(1_000_000) ?: retriever.getFrameAtTime(0)
                     val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
                     val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
                     val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
@@ -498,6 +498,7 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         val inactiveColor = MaterialColors.getColor(btnMirror, com.google.android.material.R.attr.colorSecondaryContainer, android.graphics.Color.LTGRAY)
         val inactiveIconColor = MaterialColors.getColor(btnMirror, com.google.android.material.R.attr.colorOnSecondaryContainer, android.graphics.Color.DKGRAY)
         btnMirror.setBackgroundColor(if (isMirrored) activeColor else inactiveColor)
+        btnMirror.alpha = if (btnMirror.isEnabled) 1f else 0.38f
         btnMirror.iconTint = android.content.res.ColorStateList.valueOf(if (isMirrored) activeIconColor else inactiveIconColor)
     }
 

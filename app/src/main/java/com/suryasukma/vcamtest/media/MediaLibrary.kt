@@ -45,7 +45,13 @@ object MediaLibrary {
         sourceFile(ctx)?.let { return it }
         val cur = currentPath?.let(::File)?.takeIf { it.exists() } ?: return null
         val dst = File(ctx.filesDir, SOURCE_PREFIX + cur.extension)
-        cur.copyTo(dst, overwrite = true)
+        try {
+            // A hard link is instant; later edits replace the virtual file's directory entry, leaving this one intact.
+            java.nio.file.Files.deleteIfExists(dst.toPath())
+            java.nio.file.Files.createLink(dst.toPath(), cur.toPath())
+        } catch (_: Exception) {
+            cur.copyTo(dst, overwrite = true)
+        }
         return dst
     }
 

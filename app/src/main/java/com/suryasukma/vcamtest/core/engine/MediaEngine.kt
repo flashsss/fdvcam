@@ -3,6 +3,7 @@ package com.suryasukma.vcamtest.core.engine
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Surface
 import androidx.core.net.toUri
 import androidx.media3.common.Effect
@@ -15,21 +16,26 @@ import androidx.media3.exoplayer.ExoPlayer
 
 /**
  * Handles Media3/ExoPlayer lifecycle and state management for video injection.
+ *
+ * All player calls happen on the main thread. Every play()/stop() call bumps [generation]; a queued request whose
+ * generation is no longer current is dropped, so the newest request always wins and none is lost to a "busy" flag.
  */
 @UnstableApi
 class MediaEngine(private val logAction: (String) -> Unit) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
-    
+
     @Volatile
-    private var isBusy = false
+    private var generation = 0
 
     @Volatile
     private var isPlayingInternal = false
 
-    @Volatile
-    private var currentPositionInternal = 0L
+    // Playback position is derived from a wall-clock anchor instead of polling the player (or blocking callers).
+    @Volatile private var anchorWallMs = 0L
+    @Volatile private var anchorPosMs = 0L
+    @Volatile private var durationMs = 0L
 
     @Volatile
     var videoWidth = 0
@@ -42,50 +48,44 @@ class MediaEngine(private val logAction: (String) -> Unit) {
     val isPlaying: Boolean
         get() = isPlayingInternal
 
+    /** Approximate current position of the looping clip. Never blocks. */
     val currentPosition: Long
         get() {
-            val p = player ?: return currentPositionInternal
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                val pos = p.currentPosition
-                currentPositionInternal = pos
-                return pos
-            }
-            val future = java.util.concurrent.FutureTask {
-                val pos = p.currentPosition
-                currentPositionInternal = pos
-                pos
-            }
-            mainHandler.post(future)
-            return try {
-                future.get(100, java.util.concurrent.TimeUnit.MILLISECONDS)
-            } catch (_: Throwable) {
-                currentPositionInternal
-            }
+            if (!isPlayingInternal) return anchorPosMs
+            val elapsed = SystemClock.elapsedRealtime() - anchorWallMs
+            val pos = anchorPosMs + elapsed
+            val d = durationMs
+            return if (d > 0) pos % d else pos
         }
 
     private fun log(tag: String, msg: String) {
         logAction("[$tag] $msg")
     }
 
-    fun stop() {
-        isBusy = true
-        mainHandler.post {
-            try {
-                player?.apply {
-                    stop()
-                    clearVideoSurface()
-                    release()
-                }
-            } catch (e: Throwable) {
-                log("MEDIA-ENGINE", "Stop failed: ${e.message}")
-            } finally {
-                player = null
-                isPlayingInternal = false
-                currentPositionInternal = 0L
-                videoWidth = 0
-                videoHeight = 0
-                isBusy = false
+    private fun releasePlayer() {
+        val p = player
+        player = null
+        try {
+            p?.apply {
+                stop()
+                clearVideoSurface()
+                release()
             }
+        } catch (e: Throwable) {
+            log("MEDIA-ENGINE", "Release failed: ${e.message}")
+        }
+        isPlayingInternal = false
+        anchorPosMs = 0L
+        durationMs = 0L
+        videoWidth = 0
+        videoHeight = 0
+    }
+
+    fun stop() {
+        val gen = ++generation
+        mainHandler.post {
+            if (gen != generation) return@post // a newer play() already replaced this stop
+            releasePlayer()
         }
     }
 
@@ -98,20 +98,13 @@ class MediaEngine(private val logAction: (String) -> Unit) {
         rotationAngle: Int = 0,
         onPrepared: ((ExoPlayer?) -> Unit)? = null
     ) {
+        val gen = ++generation
         mainHandler.post {
-            if (isBusy) return@post
-            
-            isBusy = true
-            try {
-                player?.apply {
-                    stop()
-                    clearVideoSurface()
-                    release()
-                }
-            } catch (_: Throwable) {}
+            if (gen != generation) return@post // superseded by a newer request
+            releasePlayer()
+            if (!surface.isValid) return@post
 
             try {
-                val uri = path.toUri()
                 log(tag, "Loading media: $path (Video only pipeline)")
 
                 val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context.applicationContext)
@@ -121,30 +114,28 @@ class MediaEngine(private val logAction: (String) -> Unit) {
                 player = exoPlayer
                 exoPlayer.volume = 0f // video only: the audio path is handled by AudioHook
 
-                val mediaItem = MediaItem.fromUri(uri)
-
                 val effects = mutableListOf<Effect>()
                 if (isMirrored || rotationAngle != 0) {
-                    val scaleX = if (isMirrored) -1f else 1f
                     effects.add(
                         ScaleAndRotateTransformation.Builder()
-                            .setScale(scaleX, 1f)
+                            .setScale(if (isMirrored) -1f else 1f, 1f)
                             .setRotationDegrees(rotationAngle.toFloat())
                             .build()
                     )
                 }
-                if (effects.isNotEmpty()) {
-                    exoPlayer.setVideoEffects(effects)
-                }
-                
-                exoPlayer.setMediaItem(mediaItem)
+                if (effects.isNotEmpty()) exoPlayer.setVideoEffects(effects)
+
+                exoPlayer.setMediaItem(MediaItem.fromUri(path.toUri()))
                 exoPlayer.setVideoSurface(surface)
                 exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
 
+                var started = false
                 exoPlayer.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (gen != generation) return
                         isPlayingInternal = isPlaying
-                        if (isPlaying) startPositionPolling() else stopPositionPolling()
+                        anchorPosMs = exoPlayer.currentPosition
+                        anchorWallMs = SystemClock.elapsedRealtime()
                     }
 
                     override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
@@ -155,63 +146,33 @@ class MediaEngine(private val logAction: (String) -> Unit) {
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_READY) {
-                            if (!isBusy) return
-                            isBusy = false
-                            
-                            if (videoWidth == 0) {
-                                videoWidth = exoPlayer.videoSize.width
-                                videoHeight = exoPlayer.videoSize.height
-                            }
-
-                            try {
-                                exoPlayer.play()
-                                log(tag, "Player ACTIVE (${videoWidth}x${videoHeight})")
-                                onPrepared?.invoke(exoPlayer)
-                            } catch (e: Throwable) {
-                                log(tag, "Start failed: ${e.message}")
-                            }
+                        if (playbackState != Player.STATE_READY || started || gen != generation) return
+                        started = true
+                        durationMs = exoPlayer.duration.coerceAtLeast(0L)
+                        if (videoWidth == 0) {
+                            videoWidth = exoPlayer.videoSize.width
+                            videoHeight = exoPlayer.videoSize.height
+                        }
+                        try {
+                            exoPlayer.play()
+                            log(tag, "Player ACTIVE (${videoWidth}x${videoHeight})")
+                            onPrepared?.invoke(exoPlayer)
+                        } catch (e: Throwable) {
+                            log(tag, "Start failed: ${e.message}")
                         }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
-                        isBusy = false
                         log(tag, "Player Error: ${error.errorCodeName} | ${error.message}")
-                        player?.release()
-                        player = null
-                        isPlayingInternal = false
+                        if (gen == generation) releasePlayer()
                     }
                 })
 
                 exoPlayer.prepare()
-
             } catch (e: Throwable) {
-                isBusy = false
                 log(tag, "Prepare failed: ${e.message}")
-                try { player?.release() } catch (_: Throwable) {}
-                player = null
-                isPlayingInternal = false
+                releasePlayer()
             }
         }
-    }
-
-    private val positionPoller = object : Runnable {
-        override fun run() {
-            player?.let {
-                currentPositionInternal = it.currentPosition
-                if (isPlayingInternal) {
-                    mainHandler.postDelayed(this, 50)
-                }
-            }
-        }
-    }
-
-    private fun startPositionPolling() {
-        mainHandler.removeCallbacks(positionPoller)
-        mainHandler.post(positionPoller)
-    }
-
-    private fun stopPositionPolling() {
-        mainHandler.removeCallbacks(positionPoller)
     }
 }
