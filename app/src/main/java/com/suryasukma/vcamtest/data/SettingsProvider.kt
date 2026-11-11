@@ -12,15 +12,23 @@ import com.suryasukma.vcamtest.data.Constants.KEY_IS_MIRRORED
 import com.suryasukma.vcamtest.data.Constants.KEY_ROTATION_ANGLE
 import com.suryasukma.vcamtest.data.Constants.KEY_MEDIA_PATH
 import com.suryasukma.vcamtest.data.Constants.PREFS_NAME
+import android.os.Binder
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.ParcelFileDescriptor
 import java.io.File
 
 class SettingsProvider : ContentProvider() {
+    @Volatile private var lastNotifyAt = 0L
+
     override fun onCreate(): Boolean = true
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         val ctx = context ?: return null
+        // The provider must be reachable from every hooked app, so it cannot be permission-protected.
+        // Instead make sure a caller can only report about itself.
+        val callerPackages = ctx.packageManager.getPackagesForUid(Binder.getCallingUid())
+        if (arg == null || callerPackages == null || !callerPackages.contains(arg)) return null
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         when (method) {
@@ -38,7 +46,10 @@ class SettingsProvider : ContentProvider() {
                 val route = extras?.getString("route") ?: "Standard"
                 val width = extras?.getInt("width") ?: 0
                 val height = extras?.getInt("height") ?: 0
-                val thumbnail = extras?.getByteArray("thumbnail")
+                val thumbnail = extras?.getByteArray("thumbnail")?.takeIf { it.size <= 256 * 1024 }
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastNotifyAt < 1000L) return Bundle()
+                lastNotifyAt = now
 
                 prefs.edit()
                     .putString(com.suryasukma.vcamtest.data.Constants.KEY_LATEST_PIPELINE_APP, packageName)
@@ -84,6 +95,8 @@ class SettingsProvider : ContentProvider() {
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val context = context ?: return null
         val fileName = uri.lastPathSegment ?: return null
+        // Only the playable media is exposed; the original (source.*) and temp files stay private.
+        if (!fileName.startsWith("virtual.")) return null
         val file = File(context.filesDir, fileName)
         
         if (file.exists()) {

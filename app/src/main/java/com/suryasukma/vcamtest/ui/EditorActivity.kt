@@ -60,6 +60,9 @@ class EditorActivity : AppCompatActivity() {
     private var trimEnd = 0L
     private var speed = 1f
     private var busy = false
+    private var cancelled = false
+    private var activeTransformer: androidx.media3.transformer.Transformer? = null
+    private var overlayRetries = 0
 
     private val frameWorker = Executors.newSingleThreadExecutor()
     private val pendingFrameMs = AtomicLong(-1)
@@ -96,7 +99,7 @@ class EditorActivity : AppCompatActivity() {
         setupTrim()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (!busy) finish()
+                if (busy) cancelExport() else finish()
             }
         })
         loadBase(src)
@@ -127,7 +130,7 @@ class EditorActivity : AppCompatActivity() {
             R.id.tab_adjust to findViewById(R.id.panel_adjust),
             R.id.tab_trim to findViewById(R.id.panel_trim),
         )
-        btnClose.setOnClickListener { if (!busy) finish() }
+        btnClose.setOnClickListener { if (busy) cancelExport() else finish() }
         btnApply.setOnClickListener { applyEdit() }
         stage.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, orr, ob ->
             if (r - l != orr - ol || b - t != ob - ot) {
@@ -328,9 +331,11 @@ class EditorActivity : AppCompatActivity() {
         val vw = stage.width.toFloat()
         val vh = stage.height.toFloat()
         if (vw <= 0f || vh <= 0f) {
-            stage.post { updateOverlayRect(bw, bh, keepCrop) }
+            // Not laid out yet: retry a few times; later layout changes are handled by the stage layout listener.
+            if (overlayRetries++ < 10) stage.post { updateOverlayRect(bw, bh, keepCrop) }
             return
         }
+        overlayRetries = 0
         val s = min(vw / bw, vh / bh)
         val w = bw * s
         val h = bh * s
@@ -345,7 +350,7 @@ class EditorActivity : AppCompatActivity() {
         busy = value
         progress.visibility = if (value) View.VISIBLE else View.GONE
         btnApply.isEnabled = !value
-        btnClose.isEnabled = !value
+        btnClose.isEnabled = true // doubles as "cancel" while exporting
     }
 
     private fun applyEdit() {
@@ -356,26 +361,42 @@ class EditorActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.toast_no_changes, Toast.LENGTH_SHORT).show()
             return
         }
+        cancelled = false
         setBusy(true)
         val tmp = File(filesDir, MediaLibrary.TEMP_OUTPUT_NAME)
         val out = File(filesDir, MediaLibrary.DEFAULT_VIDEO_NAME)
+        val appContext = applicationContext
         val done = { ok: Boolean ->
             runOnUiThread {
+                activeTransformer = null
+                if (cancelled) {
+                    tmp.delete()
+                    return@runOnUiThread
+                }
                 setBusy(false)
-                if (ok && tmp.exists()) {
-                    MediaLibrary.clearVirtual(this)
-                    tmp.renameTo(out)
+                // Swap the finished file in atomically and only then point the settings at it.
+                if (ok && tmp.exists() && MediaLibrary.replaceFile(tmp, out)) {
+                    filesDir.listFiles { _, n -> n.startsWith(MediaLibrary.VIRTUAL_PREFIX) && n != out.name }
+                        ?.forEach { it.delete() }
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit { putString(KEY_MEDIA_PATH, out.absolutePath) }
-                    Toast.makeText(this, R.string.toast_edit_done, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(appContext, R.string.toast_edit_done, Toast.LENGTH_SHORT).show()
                     setResult(RESULT_OK)
                     finish()
                 } else {
                     tmp.delete()
-                    Toast.makeText(this, R.string.toast_edit_failed, Toast.LENGTH_LONG).show()
+                    Toast.makeText(appContext, R.string.toast_edit_failed, Toast.LENGTH_LONG).show()
                 }
             }
         }
-        if (isVideo) MediaEditor.editVideo(applicationContext, src, spec, tmp, done)
-        else MediaEditor.editImage(applicationContext, src, spec, tmp, done)
+        if (isVideo) activeTransformer = MediaEditor.editVideo(appContext, src, spec, tmp, done)
+        else MediaEditor.editImage(appContext, src, spec, tmp, done)
+    }
+
+    private fun cancelExport() {
+        cancelled = true
+        try { activeTransformer?.cancel() } catch (_: Throwable) {}
+        activeTransformer = null
+        File(filesDir, MediaLibrary.TEMP_OUTPUT_NAME).delete()
+        setBusy(false)
     }
 }

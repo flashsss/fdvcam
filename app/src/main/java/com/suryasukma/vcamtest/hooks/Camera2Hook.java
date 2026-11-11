@@ -7,12 +7,15 @@ import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.view.Surface;
 
+import com.suryasukma.vcamtest.utils.SystemUtils;
 import com.suryasukma.vcamtest.xposed.XCamModule;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.libxposed.api.XposedModuleInterface;
 
@@ -22,6 +25,18 @@ import io.github.libxposed.api.XposedModuleInterface;
  */
 public class Camera2Hook {
     private final XCamModule module;
+
+    /**
+     * Native ids of the app's preview surfaces that were replaced by the dummy surface when the session was configured.
+     * addTarget() must divert exactly these surfaces and nothing else, otherwise the request targets a surface
+     * that is not part of the session (IllegalArgumentException in the host app).
+     */
+    private final Set<Long> swappedIds = ConcurrentHashMap.newKeySet();
+
+    private void resetSwapState() {
+        swappedIds.clear();
+        try { module.setPreviewSwapped(false); } catch (Throwable ignored) {}
+    }
 
     public Camera2Hook(XCamModule module) {
         this.module = module;
@@ -47,11 +62,15 @@ public class Camera2Hook {
             for (Method method : cameraDeviceClass.getDeclaredMethods()) {
                 if (method.getName().startsWith("createCaptureSession")) {
                     module.hook(method).intercept(chain -> {
-                        module.logHook("[*] Activity: CameraDeviceImpl#" + method.getName());
-                        module.incrementSessionGeneration();
-                        module.clearPreviewSurfaces();
-                        for (Object arg : chain.getArgs()) {
-                            inspectDiscoveryArgument(arg);
+                        try {
+                            module.logHook("[*] Activity: CameraDeviceImpl#" + method.getName());
+                            module.incrementSessionGeneration();
+                            module.clearPreviewSurfaces();
+                            for (Object arg : chain.getArgs()) {
+                                inspectDiscoveryArgument(arg);
+                            }
+                        } catch (Throwable t) {
+                            module.logHook("[!] createCaptureSession discovery failed: " + t);
                         }
                         return chain.proceed();
                     });
@@ -87,46 +106,54 @@ public class Camera2Hook {
             for (Constructor<?> constructor : ocClass.getDeclaredConstructors()) {
                 module.hook(constructor).intercept(chain -> {
                     if (module.getMediaPath() == null) return chain.proceed();
-
-                    Surface surface = null;
-                    int surfaceIndex = -1;
-                    List<Object> args = chain.getArgs();
-                    for (int i = 0; i < args.size(); i++) {
-                        if (args.get(i) instanceof Surface && ((Surface) args.get(i)).isValid()) {
-                            surface = (Surface) args.get(i);
-                            surfaceIndex = i;
-                            break;
+                    Object[] newArgs = null;
+                    try {
+                        Surface surface = null;
+                        int surfaceIndex = -1;
+                        List<Object> args = chain.getArgs();
+                        for (int i = 0; i < args.size(); i++) {
+                            if (args.get(i) instanceof Surface && ((Surface) args.get(i)).isValid()) {
+                                surface = (Surface) args.get(i);
+                                surfaceIndex = i;
+                                break;
+                            }
                         }
+
+                        if (surface != null && !module.isNonPreviewSurface(surface)) {
+                            String sStr = surface.toString();
+                            boolean isPreview = module.isPreviewSurface(surface) ||
+                                    sStr.contains("SurfaceTexture") ||
+                                    sStr.contains("SurfaceView") ||
+                                    sStr.contains("BLAST");
+
+                            if (isPreview) {
+                                module.registerPreviewSurface(surface);
+                                long id = SystemUtils.INSTANCE.getSurfaceId(surface);
+                                boolean alreadySwapped = swappedIds.contains(id);
+                                // Only the first preview of a session is hijacked, but a surface that was already
+                                // swapped must always be swapped again (it is configured again in a new session).
+                                if (alreadySwapped || !module.getPreviewSwapped()) {
+                                    Surface dummy = module.getDummySurface();
+                                    if (dummy != null) {
+                                        if (!alreadySwapped) {
+                                            String surfaceType = sStr.contains("SurfaceView") ? "SurfaceView" : "SurfaceTexture";
+                                            module.recordPipelineNode("Camera2(" + surfaceType + ")");
+                                            module.logHook("[!] Action: Hijacking Preview Surface via OutputConfiguration (" + sStr + ")");
+                                            module.setPreviewSwapped(true);
+                                            swappedIds.add(id);
+                                            module.handleModernPreview(surface);
+                                        }
+                                        newArgs = chain.getArgs().toArray();
+                                        newArgs[surfaceIndex] = dummy;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Throwable t) {
+                        module.logHook("[!] OutputConfiguration hijack failed: " + t);
+                        newArgs = null;
                     }
-
-                    if (surface != null) {
-                        if (module.isNonPreviewSurface(surface)) {
-                            return chain.proceed();
-                        }
-
-                        String sStr = surface.toString();
-                        boolean isPreview = module.isPreviewSurface(surface) ||
-                                sStr.contains("SurfaceTexture") ||
-                                sStr.contains("SurfaceView") ||
-                                sStr.contains("BLAST");
-
-                        if (isPreview) {
-                            module.registerPreviewSurface(surface);
-                        }
-
-                        if (isPreview && !module.getPreviewSwapped()) {
-                            String surfaceType = sStr.contains("SurfaceView") ? "SurfaceView" : "SurfaceTexture";
-                            module.recordPipelineNode("Camera2(" + surfaceType + ")");
-                            module.logHook("[!] Action: Hijacking Preview Surface via OutputConfiguration (" + sStr + ")");
-                            module.setPreviewSwapped(true);
-                            module.handleModernPreview(surface);
-
-                            Object[] newArgs = chain.getArgs().toArray();
-                            newArgs[surfaceIndex] = module.getDummySurface();
-                            return chain.proceed(newArgs);
-                        }
-                    }
-                    return chain.proceed();
+                    return newArgs != null ? chain.proceed(newArgs) : chain.proceed();
                 });
             }
             module.logHook("[+] Hooked: OutputConfiguration Constructor");
@@ -140,29 +167,30 @@ public class Camera2Hook {
             Method addTarget = CaptureRequest.Builder.class.getDeclaredMethod("addTarget", Surface.class);
             module.hook(addTarget).intercept(chain -> {
                 Surface surface = (Surface) chain.getArgs().get(0);
-                if (surface == null || module.getMediaPath() == null) return chain.proceed();
+                if (surface == null) return chain.proceed();
                 Object[] newArgs = null;
                 try {
-                    CaptureRequest.Builder builder = (CaptureRequest.Builder) chain.getThisObject();
-                    Integer intent = null;
-                    try { intent = builder.get(CaptureRequest.CONTROL_CAPTURE_INTENT); } catch (Throwable ignored) {}
+                    if (module.getMediaPath() != null) {
+                        CaptureRequest.Builder builder = (CaptureRequest.Builder) chain.getThisObject();
+                        Integer intent = null;
+                        try { intent = builder.get(CaptureRequest.CONTROL_CAPTURE_INTENT); } catch (Throwable ignored) {}
 
-                    if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE) {
-                        module.logHook("[*] Activity: addTarget [STILL_CAPTURE]");
-                        module.recordPipelineNode("Camera2(StillCapture)");
-                        module.triggerCaptureState();
-                    } else if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD) {
-                        module.logHook("[*] Activity: addTarget [VIDEO_RECORD]");
-                        module.recordPipelineNode("Camera2(VideoRecord)");
-                    } else if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT) {
-                        module.logHook("[*] Activity: addTarget [VIDEO_SNAPSHOT]");
-                        module.recordPipelineNode("Camera2(VideoSnapshot)");
+                        if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE) {
+                            module.logHook("[*] Activity: addTarget [STILL_CAPTURE]");
+                            module.recordPipelineNode("Camera2(StillCapture)");
+                            module.triggerCaptureState();
+                        } else if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD) {
+                            module.logHook("[*] Activity: addTarget [VIDEO_RECORD]");
+                            module.recordPipelineNode("Camera2(VideoRecord)");
+                        } else if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT) {
+                            module.logHook("[*] Activity: addTarget [VIDEO_SNAPSHOT]");
+                            module.recordPipelineNode("Camera2(VideoSnapshot)");
+                        }
                     }
 
-                    // The session was configured with the dummy surface in place of the app's preview surface,
-                    // so every request (still/video included) must target the dummy too, or the framework
-                    // rejects the request with IllegalArgumentException right after a capture.
-                    if (module.isPreviewSurface(surface)) {
+                    // Divert only surfaces that were replaced by the dummy when the session was configured,
+                    // decided per surface (not by a global flag or a setting that may have changed since).
+                    if (swappedIds.contains(SystemUtils.INSTANCE.getSurfaceId(surface))) {
                         Surface dummy = module.getDummySurface();
                         if (dummy != null) newArgs = new Object[] { dummy };
                     }
@@ -220,6 +248,7 @@ public class Camera2Hook {
             module.hook(deviceClose).intercept(chain -> {
                 module.logHook("[*] Activity: CameraDeviceImpl#close");
                 try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
+                resetSwapState();
                 return chain.proceed();
             });
 
@@ -227,6 +256,8 @@ public class Camera2Hook {
             Method sessionClose = sessionClass.getDeclaredMethod("close");
             module.hook(sessionClose).intercept(chain -> {
                 module.logHook("[*] Activity: CameraCaptureSessionImpl#close");
+                // Keep swappedIds: an app may close the old session after it already configured the next one.
+                try { module.setPreviewSwapped(false); } catch (Throwable ignored) {}
                 return chain.proceed();
             });
             module.logHook("[+] Hooked: Camera2 Cleanup methods");

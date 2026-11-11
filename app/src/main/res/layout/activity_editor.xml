@@ -46,6 +46,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:layout_marginHorizontal="12dp"
+        android:minHeight="140dp"
         android:background="?attr/colorSurfaceVariant">
 
         <ImageView

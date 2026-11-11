@@ -129,7 +129,6 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
-        XposedServiceHelper.registerListener(this)
         bindViews()
         setupWindowInsets()
         setupNavigation()
@@ -137,6 +136,9 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         setupMonitorPage()
         loadSettings()
         updateModuleStatusUI()
+        requestNotificationPermissionIfNeeded()
+        // registerListener may call onServiceBind synchronously: every view must be initialized first.
+        XposedServiceHelper.registerListener(this)
     }
 
     override fun onResume() {
@@ -211,10 +213,27 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
 
     private fun setupNavigation() {
         bottomNav.setOnItemSelectedListener { item ->
-            val camera = item.itemId == R.id.nav_camera
-            pageCamera.visibility = if (camera) View.VISIBLE else View.GONE
-            pageMonitor.visibility = if (camera) View.GONE else View.VISIBLE
+            showPage(item.itemId == R.id.nav_camera)
             true
+        }
+        // BottomNavigationView restores its selection after recreation without calling the listener.
+        showPage(bottomNav.selectedItemId != R.id.nav_monitor)
+    }
+
+    private fun showPage(camera: Boolean) {
+        pageCamera.visibility = if (camera) View.VISIBLE else View.GONE
+        pageMonitor.visibility = if (camera) View.GONE else View.VISIBLE
+    }
+
+    /** Capture alerts default to on, so ask once up front instead of silently dropping the first alert. */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            prefs.getBoolean(KEY_ENABLE_CAPTURE_NOTIF, true) &&
+            !prefs.getBoolean("notif_permission_asked", false) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            prefs.edit { putBoolean("notif_permission_asked", true) }
+            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -291,11 +310,20 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         Toast.makeText(this, "Importing…", Toast.LENGTH_SHORT).show()
         MediaLibrary.importUri(this, uri) { path, error ->
             runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
                 if (path != null) {
-                    prefs.edit { putBoolean(KEY_IS_ENABLED, true) }
-                    saveMediaPath(path, resetTransform = true)
-                    Toast.makeText(this, R.string.toast_media_imported, Toast.LENGTH_SHORT).show()
+                    // The old files are already gone: always persist, even if this activity was recreated meanwhile.
+                    prefs.edit {
+                        putBoolean(KEY_IS_ENABLED, true)
+                        putString(KEY_MEDIA_PATH, path)
+                        putBoolean(KEY_IS_MIRRORED, false)
+                        putInt(KEY_ROTATION_ANGLE, 0)
+                    }
+                    if (!isDestroyed) {
+                        isMirrored = false
+                        rotationAngle = 0
+                        loadSettings()
+                    }
+                    Toast.makeText(applicationContext, R.string.toast_media_imported, Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this, getString(R.string.toast_media_import_failed, error), Toast.LENGTH_LONG).show()
                 }
@@ -306,10 +334,18 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
     private fun resetToOriginal() {
         MediaLibrary.resetToOriginal(this) { path, error ->
             runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
                 if (path != null) {
-                    saveMediaPath(path, resetTransform = true)
-                    Toast.makeText(this, R.string.toast_reset_done, Toast.LENGTH_SHORT).show()
+                    prefs.edit {
+                        putString(KEY_MEDIA_PATH, path)
+                        putBoolean(KEY_IS_MIRRORED, false)
+                        putInt(KEY_ROTATION_ANGLE, 0)
+                    }
+                    if (!isDestroyed) {
+                        isMirrored = false
+                        rotationAngle = 0
+                        loadSettings()
+                    }
+                    Toast.makeText(applicationContext, R.string.toast_reset_done, Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this, error ?: "Reset failed", Toast.LENGTH_SHORT).show()
                 }

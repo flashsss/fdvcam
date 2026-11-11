@@ -114,10 +114,12 @@ object MediaRemuxer {
             var firstEncoderPtsUs = -1L
             val timeoutUs = 5000L
             val loopStartTimeMs = System.currentTimeMillis()
+            var timedOut = false
 
             while (!encoderOutputEos) {
                 if (System.currentTimeMillis() - loopStartTimeMs > 6000) {
                     logAction?.invoke("[TRANSCODE] Loop timed out")
+                    timedOut = true
                     break
                 }
 
@@ -218,9 +220,16 @@ object MediaRemuxer {
                 }
             }
 
-            muxer.stop()
+            try { muxer.stop() } catch (_: Throwable) {}
             muxer.release()
             muxer = null
+
+            if (timedOut) {
+                // Never report a truncated mp4 as a successful trim: the caller falls back to copying the full file.
+                tempOutputFile.delete()
+                logAction?.invoke("[TRANSCODE] Discarded partial output after timeout")
+                return false
+            }
 
             if (tempOutputFile.exists() && tempOutputFile.length() > 0) {
                 if (targetFile.exists()) {

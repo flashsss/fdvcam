@@ -37,7 +37,7 @@ object MediaEditor {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
-    fun editVideo(ctx: Context, source: File, spec: EditSpec, output: File, onDone: (Boolean) -> Unit) {
+    fun editVideo(ctx: Context, source: File, spec: EditSpec, output: File, onDone: (Boolean) -> Unit): Transformer? {
         output.delete()
         val effects = mutableListOf<Effect>()
         if (spec.flipH || spec.flipV) {
@@ -85,10 +85,12 @@ object MediaEditor {
             override fun onCompleted(composition: Composition, exportResult: ExportResult) = onDone(true)
             override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) = onDone(false)
         })
-        try {
+        return try {
             transformer.start(edited, output.absolutePath)
+            transformer
         } catch (_: Exception) {
             onDone(false)
+            null
         }
     }
 

@@ -93,6 +93,9 @@ class XCamModule : XposedModule() {
 
     fun isCapturingState() = captureManager.isCapturing
 
+    fun hasInjectionToken() = captureManager.hasInjectionToken()
+    fun consumeInjectionToken() = captureManager.consumeInjectionToken()
+
     fun triggerCaptureState() {
         captureManager.triggerCaptureState { engine.getCurrentPosition().toInt() }
     }

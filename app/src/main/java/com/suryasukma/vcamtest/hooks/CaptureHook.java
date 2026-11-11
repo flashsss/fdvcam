@@ -130,6 +130,7 @@ public class CaptureHook {
                                     module.recordPipelineNode(nodeDesc);
                                     module.reportPipelineCapture(actualW, actualH, injected);
                                     module.logHook("[*] Activity: Captured -> Injected into BitmapFactory#decodeByteArray (" + actualW + "x" + actualH + ")");
+                                    module.consumeInjectionToken();
                                     Object[] args = chain.getArgs().toArray();
                                     args[0] = injected;
                                     if (args.length >= 3) { args[1] = 0; args[2] = injected.length; }
@@ -157,7 +158,7 @@ public class CaptureHook {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
                         if (module.isCapturingState() && module.getMediaPath() != null
-                                && !isBoundsOnly(chain.getArgs(), 2)) {
+                                && module.hasInjectionToken() && !isBoundsOnly(chain.getArgs(), 2)) {
                             int activeW = imageReaderHook.getActiveCaptureWidth();
                             int activeH = imageReaderHook.getActiveCaptureHeight();
                             int targetW = activeW > 0 ? activeW : Constants.DEFAULT_CAPTURE_WIDTH;
@@ -184,6 +185,7 @@ public class CaptureHook {
                                         module.recordPipelineNode(nodeDesc);
                                         module.reportPipelineCapture(actualW, actualH, injected);
                                         module.logHook("[*] Activity: Captured -> Injected virtual Bitmap into BitmapFactory#decodeStream (" + actualW + "x" + actualH + ")");
+                                        module.consumeInjectionToken();
                                         return bitmap;
                                     }
                                 } catch (Throwable t) {
@@ -210,9 +212,9 @@ public class CaptureHook {
                 try {
                     Bitmap self = (Bitmap) chain.getThisObject();
                     bigJpeg = chain.getArgs().get(0) == Bitmap.CompressFormat.JPEG
-                            && self != null && (long) self.getWidth() * self.getHeight() >= 100_000L;
+                            && self != null && (long) self.getWidth() * self.getHeight() >= 500_000L;
                 } catch (Throwable ignored) {}
-                if (bigJpeg && module.isCapturingState() && module.getMediaPath() != null) {
+                if (bigJpeg && module.isCapturingState() && module.getMediaPath() != null && module.hasInjectionToken()) {
                     int activeW = imageReaderHook.getActiveCaptureWidth();
                     int activeH = imageReaderHook.getActiveCaptureHeight();
                     int targetW = activeW > 0 ? activeW : Constants.DEFAULT_CAPTURE_WIDTH;
@@ -239,6 +241,7 @@ public class CaptureHook {
                                 module.recordPipelineNode(nodeDesc);
                                 module.reportPipelineCapture(actualW, actualH, injected);
                                 module.logHook("[*] Activity: Captured -> Injected into Bitmap#compress (" + actualW + "x" + actualH + ")");
+                                module.consumeInjectionToken();
                                 return true;
                             } catch (Throwable t) {
                                 module.logHook("[!] Bitmap#compress injection FAILED: " + t.getMessage());
@@ -436,22 +439,24 @@ public class CaptureHook {
             }
 
             if (!replaced) {
-                try (InputStream in = openSourceStream(mediaPath);
-                     FileOutputStream out = new FileOutputStream(destFile, false)) {
+                try (InputStream in = openSourceStream(mediaPath)) {
                     if (in != null) {
-                        byte[] buffer = new byte[65536];
-                        int len;
-                        while ((len = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, len);
-                            copiedBytes += len;
+                        // Only open (and truncate) the recorded file once the replacement source is readable.
+                        try (FileOutputStream out = new FileOutputStream(destFile, false)) {
+                            byte[] buffer = new byte[65536];
+                            int len;
+                            while ((len = in.read(buffer)) != -1) {
+                                out.write(buffer, 0, len);
+                                copiedBytes += len;
+                            }
+                            out.flush();
+                            try {
+                                out.getFD().sync();
+                            } catch (Throwable ignored) {}
+                            replaced = true;
+                            module.recordPipelineNode("MediaRecorder(VideoReplaced)");
+                            module.logHook("[*] Activity: MediaRecorder#stop -> Successfully replaced file: " + target.path + " (" + copiedBytes + " bytes)");
                         }
-                        out.flush();
-                        try {
-                            out.getFD().sync();
-                        } catch (Throwable ignored) {}
-                        replaced = true;
-                        module.recordPipelineNode("MediaRecorder(VideoReplaced)");
-                        module.logHook("[*] Activity: MediaRecorder#stop -> Successfully replaced file: " + target.path + " (" + copiedBytes + " bytes)");
                     }
                 } catch (Throwable t) {
                     module.logHook("[!] Failed to replace file at " + target.path + ": " + t.getMessage());

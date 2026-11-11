@@ -25,9 +25,9 @@ import io.github.libxposed.api.XposedModuleInterface;
  */
 public class ImageReaderHook {
     private final XCamModule module;
-    private final Set<String> detectedFlows = new HashSet<>();
-    private final Set<String> injectedFlows = new HashSet<>();
-    private final Map<ImageReader, ReaderMetadata> readerTracker = new WeakHashMap<>();
+    private final Set<String> detectedFlows = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<String> injectedFlows = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Map<ImageReader, ReaderMetadata> readerTracker = java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
     private volatile int activeCaptureWidth = 0;
     private volatile int activeCaptureHeight = 0;
@@ -293,6 +293,7 @@ public class ImageReaderHook {
                             module.recordPipelineNode("ImageReader(" + w + "x" + h + " " + shortFmt + ")");
                             module.reportPipelineCapture(w, h, replacement);
                             module.logHook("[+] Activity: ImageReader JPEG replaced successfully (" + replacement.length + " bytes)");
+                            module.consumeInjectionToken();
                         }
                     }
                 }

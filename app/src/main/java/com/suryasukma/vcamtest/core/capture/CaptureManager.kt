@@ -35,6 +35,15 @@ class CaptureManager(
     }
     private val captureLock = Any()
 
+    /**
+     * One-shot token armed by a capture pulse and consumed by the first hook that actually injects the photo.
+     * Generic decode/compress hooks (decodeStream, Bitmap#compress) only fire while the token is armed, so avatars,
+     * stickers and thumbnails decoded around the same time are left alone.
+     */
+    private val injectionToken = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun hasInjectionToken(): Boolean = injectionToken.get()
+    fun consumeInjectionToken(): Boolean = injectionToken.compareAndSet(true, false)
+
     private fun cacheGet(key: CaptureKey, maxSize: Int): ByteArray? =
         synchronized(cacheLock) { captureCache[key]?.takeIf { it.size <= maxSize } }
 
@@ -55,6 +64,7 @@ class CaptureManager(
     fun reset() {
         uiHandler.removeCallbacksAndMessages(null)
         isCapturing = false
+        injectionToken.set(false)
         cacheClear()
         cachedStreamFrame = null
         streamKey = null
@@ -71,12 +81,14 @@ class CaptureManager(
         log("[*] Pulse detected! Target Frame Time: $captureTimeMs ms")
 
         isCapturing = true
+        injectionToken.set(true)
         cacheClear()
 
         contextProvider()?.let { refreshSettingsAction(it) }
         uiHandler.removeCallbacksAndMessages(null)
         uiHandler.postDelayed({
             isCapturing = false
+            injectionToken.set(false)
             uiHandler.postDelayed({ cacheClear() }, 5000)
         }, 3000)
     }

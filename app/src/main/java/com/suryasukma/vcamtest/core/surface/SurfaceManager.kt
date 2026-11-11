@@ -9,11 +9,11 @@ import com.suryasukma.vcamtest.utils.SystemUtils
  * Uses native object IDs to track surfaces across different API hooks.
  */
 class SurfaceManager(private val logAction: (String) -> Unit) {
-    private val previewIds = mutableSetOf<Long>()
-    private val nonPreviewIds = mutableSetOf<Long>()
-    
-    var previewSwapped = false
-    var sessionGeneration = 0
+    private val previewIds: MutableSet<Long> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val nonPreviewIds: MutableSet<Long> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    @Volatile var previewSwapped = false
+    @Volatile var sessionGeneration = 0
         private set
         
     private var lastIncrementTime = 0L

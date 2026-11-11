@@ -28,7 +28,25 @@ public class CameraHook {
     private final Handler mainHandler;
     private final Set<String> hookedPreviewCallbackClasses = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private volatile Surface viewfinderSurface;
-    private volatile SurfaceTexture dummySurfaceTexture;
+    // One dummy texture per Camera instance: front/back switching opens the second camera before the first is released.
+    private final java.util.Map<Camera, SurfaceTexture> dummyTextures =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    private SurfaceTexture dummyFor(Camera camera) {
+        synchronized (dummyTextures) {
+            SurfaceTexture st = dummyTextures.get(camera);
+            if (st == null) {
+                st = new SurfaceTexture(10);
+                dummyTextures.put(camera, st);
+            }
+            return st;
+        }
+    }
+
+    private void releaseDummyFor(Camera camera) {
+        SurfaceTexture st = dummyTextures.remove(camera);
+        if (st != null) { try { st.release(); } catch (Throwable ignored) {} }
+    }
 
     public CameraHook(XCamModule module) {
         this.module = module;
@@ -84,12 +102,9 @@ public class CameraHook {
                 if (holder != null && holder.getSurface() != null && module.getMediaPath() != null) {
                     viewfinderSurface = holder.getSurface();
                     module.registerPreviewSurface(viewfinderSurface);
-                    if (dummySurfaceTexture == null) {
-                        dummySurfaceTexture = new SurfaceTexture(10);
-                    }
                     try {
                         Camera camera = (Camera) chain.getThisObject();
-                        camera.setPreviewTexture(dummySurfaceTexture);
+                        camera.setPreviewTexture(dummyFor(camera));
                         module.logHook("[+] Hijacked Camera#setPreviewDisplay -> diverted camera to dummy texture");
                         return null;
                     } catch (Throwable ignored) {}
@@ -102,11 +117,10 @@ public class CameraHook {
             module.hook(setPreviewTexture).intercept(chain -> {
                 SurfaceTexture texture = (SurfaceTexture) chain.getArgs().get(0);
                 if (texture != null && module.getMediaPath() != null) {
-                    if (texture == dummySurfaceTexture) {
+                    Camera cam = (Camera) chain.getThisObject();
+                    SurfaceTexture dummy = dummyFor(cam);
+                    if (texture == dummy) {
                         return chain.proceed();
-                    }
-                    if (dummySurfaceTexture == null) {
-                        dummySurfaceTexture = new SurfaceTexture(10);
                     }
                     Surface old = viewfinderSurface;
                     viewfinderSurface = new Surface(texture);
@@ -114,7 +128,7 @@ public class CameraHook {
                     module.registerPreviewSurface(viewfinderSurface);
                     module.logHook("[+] Hijacked Camera#setPreviewTexture -> diverted camera to dummy texture");
                     Object[] newArgs = chain.getArgs().toArray();
-                    newArgs[0] = dummySurfaceTexture;
+                    newArgs[0] = dummy;
                     return chain.proceed(newArgs);
                 }
                 return chain.proceed();
@@ -382,12 +396,11 @@ public class CameraHook {
             module.hook(release).intercept(chain -> {
                 module.logHook("[*] Camera#release invoked");
                 try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
+                Camera self = (Camera) chain.getThisObject();
                 try {
                     return chain.proceed();
                 } finally {
-                    SurfaceTexture st = dummySurfaceTexture;
-                    dummySurfaceTexture = null;
-                    if (st != null) { try { st.release(); } catch (Throwable ignored) {} }
+                    releaseDummyFor(self);
                 }
             });
             module.logHook("[+] Hooked: Camera#release");
