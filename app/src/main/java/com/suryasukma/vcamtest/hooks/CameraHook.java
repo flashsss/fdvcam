@@ -136,7 +136,7 @@ public class CameraHook {
             Method stopPreview = Camera.class.getDeclaredMethod("stopPreview");
             module.hook(stopPreview).intercept(chain -> {
                 Object result = chain.proceed();
-                module.stopEngine();
+                try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
                 if (dummySurfaceTexture != null) {
                     try { dummySurfaceTexture.release(); } catch (Throwable ignored) {}
                     dummySurfaceTexture = null;
@@ -176,11 +176,19 @@ public class CameraHook {
                         PictureCallback jpegCallback = (PictureCallback) chain.getArgs().get(3);
                         if (jpegCallback == null) return chain.proceed();
 
-                        module.triggerCaptureState();
-                        Camera.Parameters params = camera.getParameters();
-                        int picW = params.getPictureSize().width;
-                        int picH = params.getPictureSize().height;
-                        byte[] imageData = module.handleCapture(picW, picH);
+                        final int picW;
+                        final int picH;
+                        final byte[] imageData;
+                        try {
+                            module.triggerCaptureState();
+                            Camera.Parameters params = camera.getParameters();
+                            picW = params.getPictureSize().width;
+                            picH = params.getPictureSize().height;
+                            imageData = module.handleCapture(picW, picH);
+                        } catch (Throwable t) {
+                            module.logHook("[!] takePicture injection failed: " + t);
+                            return chain.proceed();
+                        }
 
                         if (imageData == null) return chain.proceed();
 
@@ -196,8 +204,9 @@ public class CameraHook {
                                 if (shutterCallback != null) shutterCallback.onShutter();
                                 if (rawCallback != null) rawCallback.onPictureTaken(null, camera);
                                 if (postviewCallback != null) postviewCallback.onPictureTaken(null, camera);
+                                // The real takePicture() never ran, so the preview was never stopped:
+                                // do not restart it here (that re-opened the preview after the app had closed the camera).
                                 jpegCallback.onPictureTaken(imageData, camera);
-                                mainHandler.postDelayed(() -> { try { camera.startPreview(); } catch (Throwable ignored) {} }, PREVIEW_RESTART_DELAY_MS);
                             } catch (Throwable ignored) {}
                         };
                         if (Looper.myLooper() == Looper.getMainLooper()) deliver.run(); else mainHandler.post(deliver);
@@ -369,7 +378,7 @@ public class CameraHook {
             Method release = Camera.class.getDeclaredMethod("release");
             module.hook(release).intercept(chain -> {
                 module.logHook("[*] Camera#release invoked");
-                module.stopEngine();
+                try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
                 return chain.proceed();
             });
             module.logHook("[+] Hooked: Camera#release");

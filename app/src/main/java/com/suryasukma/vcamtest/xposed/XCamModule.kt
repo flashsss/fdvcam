@@ -151,18 +151,13 @@ class XCamModule : XposedModule() {
         }
     }
 
+    /** Best-effort cleanup: every step runs even if another one fails, and nothing is rethrown into the host app. */
     fun stopEngine() {
-        synchronized(yuvLock) {
-            yuvDecoder?.stop()
-            yuvDecoder = null
-        }
-        synchronized(audioLock) {
-            audioDecoder?.stop()
-            audioDecoder = null
-        }
-        engine.stop()
-        captureManager.reset()
-        injectors.imageReaderHook.reset()
+        runCatching { synchronized(yuvLock) { yuvDecoder?.stop(); yuvDecoder = null } }
+        runCatching { synchronized(audioLock) { audioDecoder?.stop(); audioDecoder = null } }
+        runCatching { engine.stop() }
+        runCatching { captureManager.reset() }
+        runCatching { injectors.imageReaderHook.reset() }
     }
     fun handleCamera1Preview(st: SurfaceTexture) = engine.handleCamera1Preview(st)
     fun handleModernPreview(s: Surface) = engine.handleModernPreview(s)

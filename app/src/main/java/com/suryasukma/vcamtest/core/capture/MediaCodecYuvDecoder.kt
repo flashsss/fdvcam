@@ -57,7 +57,7 @@ class MediaCodecYuvDecoder(
         isRunning = false
         decodeThread?.interrupt()
         try {
-            decodeThread?.join(500)
+            decodeThread?.join(150)
         } catch (_: InterruptedException) {}
         decodeThread = null
         latestFrame = null

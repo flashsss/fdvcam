@@ -140,7 +140,9 @@ public class Camera2Hook {
             Method addTarget = CaptureRequest.Builder.class.getDeclaredMethod("addTarget", Surface.class);
             module.hook(addTarget).intercept(chain -> {
                 Surface surface = (Surface) chain.getArgs().get(0);
-                if (surface != null && module.getMediaPath() != null) {
+                if (surface == null || module.getMediaPath() == null) return chain.proceed();
+                Object[] newArgs = null;
+                try {
                     CaptureRequest.Builder builder = (CaptureRequest.Builder) chain.getThisObject();
                     Integer intent = null;
                     try { intent = builder.get(CaptureRequest.CONTROL_CAPTURE_INTENT); } catch (Throwable ignored) {}
@@ -149,27 +151,26 @@ public class Camera2Hook {
                         module.logHook("[*] Activity: addTarget [STILL_CAPTURE]");
                         module.recordPipelineNode("Camera2(StillCapture)");
                         module.triggerCaptureState();
-                        return chain.proceed();
-                    }
-
-                    if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD) {
+                    } else if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD) {
                         module.logHook("[*] Activity: addTarget [VIDEO_RECORD]");
                         module.recordPipelineNode("Camera2(VideoRecord)");
-                        return chain.proceed();
-                    }
-
-                    if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT) {
+                    } else if (intent != null && intent == CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT) {
                         module.logHook("[*] Activity: addTarget [VIDEO_SNAPSHOT]");
                         module.recordPipelineNode("Camera2(VideoSnapshot)");
-                        return chain.proceed();
                     }
 
+                    // The session was configured with the dummy surface in place of the app's preview surface,
+                    // so every request (still/video included) must target the dummy too, or the framework
+                    // rejects the request with IllegalArgumentException right after a capture.
                     if (module.isPreviewSurface(surface)) {
-                        Object[] newArgs = new Object[] { module.getDummySurface() };
-                        return chain.proceed(newArgs);
+                        Surface dummy = module.getDummySurface();
+                        if (dummy != null) newArgs = new Object[] { dummy };
                     }
+                } catch (Throwable t) {
+                    module.logHook("[!] addTarget diversion failed: " + t);
+                    newArgs = null;
                 }
-                return chain.proceed();
+                return newArgs != null ? chain.proceed(newArgs) : chain.proceed();
             });
             module.logHook("[+] Hooked: CaptureRequest.Builder#addTarget");
 
@@ -218,7 +219,7 @@ public class Camera2Hook {
             Method deviceClose = cameraDeviceClass.getDeclaredMethod("close");
             module.hook(deviceClose).intercept(chain -> {
                 module.logHook("[*] Activity: CameraDeviceImpl#close");
-                module.stopEngine();
+                try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
                 return chain.proceed();
             });
 
