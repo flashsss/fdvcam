@@ -58,6 +58,7 @@ class EditorActivity : AppCompatActivity() {
     private var durationMs = 0L
     private var trimStart = 0L
     private var trimEnd = 0L
+    private var speed = 1f
     private var busy = false
 
     private val frameWorker = Executors.newSingleThreadExecutor()
@@ -200,6 +201,12 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun setupTrim() {
+        val sliderSpeed = findViewById<Slider>(R.id.slider_speed)
+        val tvSpeed = findViewById<TextView>(R.id.tv_speed)
+        sliderSpeed.addOnChangeListener { _, v, _ ->
+            speed = v
+            tvSpeed.text = String.format(Locale.US, "%s  %.2f×", getString(R.string.label_speed), v)
+        }
         var lastStart = 0f
         sliderTrim.addOnChangeListener { slider, _, fromUser ->
             val v = slider.values
@@ -298,6 +305,7 @@ class EditorActivity : AppCompatActivity() {
             crop.left, crop.top, crop.right, crop.bottom,
             brightness, contrast, saturation,
             if (isVideo) trimStart else 0L, end,
+            if (isVideo) speed else 1f,
         )
     }
 

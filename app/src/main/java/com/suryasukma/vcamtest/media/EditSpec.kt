@@ -25,14 +25,16 @@ data class EditSpec(
     val saturation: Float = 0f,   // -100..100
     val trimStartMs: Long = 0L,
     val trimEndMs: Long = -1L,    // -1 = until end
+    val speed: Float = 1f,        // video playback speed, 0.25..4
 ) {
     val hasGeometry get() = rotation % 360 != 0 || flipH || flipV
     val hasCrop get() = cropLeft > 0.001f || cropTop > 0.001f || cropRight < 0.999f || cropBottom < 0.999f
     val hasColor get() = brightness != 0f || contrast != 0f || saturation != 0f
     val hasTrim get() = trimStartMs > 0L || trimEndMs >= 0L
+    val hasSpeed get() = speed != 1f
 
     fun isIdentity(includeTrim: Boolean): Boolean =
-        !hasGeometry && !hasCrop && !hasColor && !(includeTrim && hasTrim)
+        !hasGeometry && !hasCrop && !hasColor && !(includeTrim && (hasTrim || hasSpeed))
 
     /** Brightness/contrast/saturation as a ColorMatrix (shared by preview and image export). */
     fun colorMatrix(): ColorMatrix {

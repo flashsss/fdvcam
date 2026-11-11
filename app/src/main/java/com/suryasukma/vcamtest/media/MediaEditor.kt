@@ -9,7 +9,9 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.Effect
+import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.transformer.Effects
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -75,6 +77,7 @@ object MediaEditor {
 
         val edited = EditedMediaItem.Builder(mediaItem)
             .setEffects(Effects(emptyList(), effects))
+            .apply { if (spec.hasSpeed) setSpeed(constantSpeed(spec.speed)) }
             .build()
 
         val transformer = Transformer.Builder(ctx).build()
@@ -87,6 +90,11 @@ object MediaEditor {
         } catch (_: Exception) {
             onDone(false)
         }
+    }
+
+    private fun constantSpeed(speed: Float) = object : SpeedProvider {
+        override fun getSpeed(timeUs: Long): Float = speed
+        override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
     }
 
     fun editImage(ctx: Context, source: File, spec: EditSpec, output: File, onDone: (Boolean) -> Unit) {

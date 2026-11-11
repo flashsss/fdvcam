@@ -32,7 +32,8 @@
     <string name="tab_crop">Crop</string>
     <string name="tab_rotate">Rotate</string>
     <string name="tab_adjust">Adjust</string>
-    <string name="tab_trim">Trim</string>
+    <string name="tab_trim">Time</string>
+    <string name="label_speed">Speed</string>
     <string name="aspect_free">Free</string>
     <string name="btn_reset_crop">Reset crop</string>
     <string name="label_brightness">Brightness</string>
