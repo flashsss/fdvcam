@@ -97,8 +97,28 @@ class MediaEngine(private val logAction: (String) -> Unit) {
         isMirrored: Boolean = false,
         rotationAngle: Int = 0,
         onPrepared: ((ExoPlayer?) -> Unit)? = null
+    ) = playInternal(context, path, surface, tag, isMirrored, rotationAngle, onPrepared, attempt = 0)
+
+    /** A failed or stuck player is restarted a couple of times instead of leaving a frozen preview behind. */
+    private fun playInternal(
+        context: Context,
+        path: String,
+        surface: Surface,
+        tag: String,
+        isMirrored: Boolean,
+        rotationAngle: Int,
+        onPrepared: ((ExoPlayer?) -> Unit)?,
+        attempt: Int,
     ) {
         val gen = ++generation
+        val retry = {
+            if (attempt < MAX_RETRIES) {
+                log(tag, "Restarting player (attempt ${attempt + 1}/$MAX_RETRIES)")
+                mainHandler.postDelayed({
+                    if (gen == generation) playInternal(context, path, surface, tag, isMirrored, rotationAngle, onPrepared, attempt + 1)
+                }, RETRY_DELAY_MS)
+            }
+        }
         mainHandler.post {
             if (gen != generation) return@post // superseded by a newer request
             releasePlayer()
@@ -130,6 +150,14 @@ class MediaEngine(private val logAction: (String) -> Unit) {
                 exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
 
                 var started = false
+                // Watchdog: a player that never becomes ready (stuck decoder / surface) would show a frozen frame forever.
+                mainHandler.postDelayed({
+                    if (gen == generation && !started) {
+                        log(tag, "Player not ready after ${READY_TIMEOUT_MS} ms")
+                        releasePlayer()
+                        retry()
+                    }
+                }, READY_TIMEOUT_MS)
                 exoPlayer.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         if (gen != generation) return
@@ -164,7 +192,10 @@ class MediaEngine(private val logAction: (String) -> Unit) {
 
                     override fun onPlayerError(error: PlaybackException) {
                         log(tag, "Player Error: ${error.errorCodeName} | ${error.message}")
-                        if (gen == generation) releasePlayer()
+                        if (gen == generation) {
+                            releasePlayer()
+                            retry()
+                        }
                     }
                 })
 
@@ -172,7 +203,14 @@ class MediaEngine(private val logAction: (String) -> Unit) {
             } catch (e: Throwable) {
                 log(tag, "Prepare failed: ${e.message}")
                 releasePlayer()
+                retry()
             }
         }
+    }
+
+    private companion object {
+        const val MAX_RETRIES = 2
+        const val RETRY_DELAY_MS = 400L
+        const val READY_TIMEOUT_MS = 4000L
     }
 }

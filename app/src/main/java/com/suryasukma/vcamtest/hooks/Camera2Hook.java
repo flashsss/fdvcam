@@ -33,6 +33,15 @@ public class Camera2Hook {
      */
     private final Set<Long> swappedIds = ConcurrentHashMap.newKeySet();
 
+    // The CameraDevice whose session the engine serves (see CameraHook#engineOwner for the rationale).
+    private volatile java.lang.ref.WeakReference<Object> engineDevice;
+
+    private boolean ownsEngine(Object device) {
+        java.lang.ref.WeakReference<Object> ref = engineDevice;
+        Object owner = ref != null ? ref.get() : null;
+        return owner == null || owner == device;
+    }
+
     private void resetSwapState() {
         swappedIds.clear();
         try { module.setPreviewSwapped(false); } catch (Throwable ignored) {}
@@ -63,6 +72,7 @@ public class Camera2Hook {
                 if (method.getName().startsWith("createCaptureSession")) {
                     module.hook(method).intercept(chain -> {
                         try {
+                            engineDevice = new java.lang.ref.WeakReference<>(chain.getThisObject());
                             module.logHook("[*] Activity: CameraDeviceImpl#" + method.getName());
                             module.incrementSessionGeneration();
                             module.clearPreviewSurfaces();
@@ -247,8 +257,13 @@ public class Camera2Hook {
             Method deviceClose = cameraDeviceClass.getDeclaredMethod("close");
             module.hook(deviceClose).intercept(chain -> {
                 module.logHook("[*] Activity: CameraDeviceImpl#close");
-                try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
-                resetSwapState();
+                if (ownsEngine(chain.getThisObject())) {
+                    engineDevice = null;
+                    try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
+                    resetSwapState();
+                } else {
+                    module.logHook("[*] CameraDeviceImpl#close: belongs to another device, engine keeps playing");
+                }
                 return chain.proceed();
             });
 

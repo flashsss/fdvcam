@@ -29,6 +29,25 @@ public class CameraHook {
     private final Handler mainHandler;
     private final Set<String> hookedPreviewCallbackClasses = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private volatile Surface viewfinderSurface;
+    // The camera whose preview the engine is currently playing into. Apps (Telegram video notes, camera switching)
+    // often open the new camera before releasing the old one: the old camera must not stop the new one's playback.
+    private volatile java.lang.ref.WeakReference<Camera> engineOwner;
+
+    private boolean ownsEngine(Camera camera) {
+        java.lang.ref.WeakReference<Camera> ref = engineOwner;
+        Camera owner = ref != null ? ref.get() : null;
+        return owner == null || owner == camera;
+    }
+
+    private void stopEngineIfOwned(Camera camera, String why) {
+        if (!ownsEngine(camera)) {
+            module.logHook("[*] " + why + ": belongs to another camera, engine keeps playing");
+            return;
+        }
+        engineOwner = null;
+        try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
+    }
+
     // One dummy texture per Camera instance: front/back switching opens the second camera before the first is released.
     private final java.util.Map<Camera, SurfaceTexture> dummyTextures =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
@@ -141,6 +160,7 @@ public class CameraHook {
             module.hook(startPreview).intercept(chain -> {
                 Object result = chain.proceed();
                 if (module.getMediaPath() != null && viewfinderSurface != null && viewfinderSurface.isValid()) {
+                    engineOwner = new java.lang.ref.WeakReference<>((Camera) chain.getThisObject());
                     module.recordPipelineNode("Camera1(PreviewStarted)");
                     module.logHook("[*] Starting FDVCam playback for Camera1 preview surface: " + viewfinderSurface);
                     module.handleModernPreview(viewfinderSurface);
@@ -152,7 +172,7 @@ public class CameraHook {
             Method stopPreview = Camera.class.getDeclaredMethod("stopPreview");
             module.hook(stopPreview).intercept(chain -> {
                 Object result = chain.proceed();
-                try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
+                stopEngineIfOwned((Camera) chain.getThisObject(), "Camera#stopPreview");
                 // The real camera is still bound to the dummy texture after stopPreview();
                 // it is only released together with the camera (see hookRelease).
                 return result;
@@ -409,9 +429,9 @@ public class CameraHook {
         try {
             Method release = Camera.class.getDeclaredMethod("release");
             module.hook(release).intercept(chain -> {
-                module.logHook("[*] Camera#release invoked");
-                try { module.stopEngine(); } catch (Throwable t) { module.logHook("[!] stopEngine failed: " + t); }
                 Camera self = (Camera) chain.getThisObject();
+                module.logHook("[*] Camera#release invoked");
+                stopEngineIfOwned(self, "Camera#release");
                 try {
                     return chain.proceed();
                 } finally {
