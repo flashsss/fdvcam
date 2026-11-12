@@ -116,6 +116,16 @@ public class CaptureHook {
                     module.hook(method).intercept(chain -> {
                         if (module.isIgnoringHooks()) return chain.proceed();
                         Object[] newArgs = null;
+                        // The app is decoding the exact JPEG we already delivered: leave it alone, a second extraction
+                        // could have a different size than the photo the app was told about.
+                        try {
+                            Object first = chain.getArgs().get(0);
+                            if (first instanceof byte[] && module.isDeliveredJpeg((byte[]) first)) {
+                                module.consumeInjectionToken();
+                                logSkip("decodeByteArray (already our photo)");
+                                return chain.proceed();
+                            }
+                        } catch (Throwable ignored) {}
                         if (module.isCapturingState() && module.getMediaPath() != null
                                 && !looksLikeCaptureDecode(chain.getArgs())) {
                             logSkip("decodeByteArray (not a capture-sized JPEG)");

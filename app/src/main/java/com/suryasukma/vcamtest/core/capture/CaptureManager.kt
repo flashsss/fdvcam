@@ -36,6 +36,37 @@ class CaptureManager(
     private val captureLock = Any()
 
     /**
+     * Fingerprints of the JPEGs this module already handed to the app (takePicture callback, ImageReader buffer).
+     * When the app later decodes those very bytes, the decode hook must NOT replace them with a freshly extracted frame:
+     * the second image can have a different size than the one the app was told about (it is what broke sending photos).
+     */
+    private val delivered = ArrayDeque<Long>()
+
+    private fun fingerprint(b: ByteArray): Long {
+        var h = b.size.toLong()
+        val n = minOf(b.size, 256)
+        for (i in 0 until n) h = h * 31 + b[i]
+        for (i in b.size - n until b.size) h = h * 31 + b[i]
+        return h
+    }
+
+    private fun rememberDelivered(b: ByteArray) {
+        val f = fingerprint(b)
+        synchronized(delivered) {
+            if (!delivered.contains(f)) {
+                delivered.addLast(f)
+                while (delivered.size > 8) delivered.removeFirst()
+            }
+        }
+    }
+
+    fun isDelivered(b: ByteArray?): Boolean {
+        if (b == null || b.size < 512) return false
+        val f = fingerprint(b)
+        return synchronized(delivered) { delivered.contains(f) }
+    }
+
+    /**
      * One-shot token armed by a capture pulse and consumed by the first hook that actually injects the photo.
      * Generic decode/compress hooks (decodeStream, Bitmap#compress) only fire while the token is armed, so avatars,
      * stickers and thumbnails decoded around the same time are left alone.
@@ -140,15 +171,16 @@ class CaptureManager(
         val context = contextProvider() ?: return null
 
         val key = CaptureKey(path, width, height, rotationAngle, isMirrored)
-        cacheGet(key, maxSizeBytes)?.let { return it }
+        cacheGet(key, maxSizeBytes)?.let { rememberDelivered(it); return it }
 
         // Heavy work is serialized on its own lock (not the stream lock) and re-checks the cache once inside.
         return synchronized(captureLock) {
-            cacheGet(key, maxSizeBytes)?.let { return@synchronized it }
+            cacheGet(key, maxSizeBytes)?.let { rememberDelivered(it); return@synchronized it }
             performExtraction(
                 context, path, width, height, rotationAngle, isMirrored, captureTimeMs, maxSizeBytes, setIgnoringHooks, liveFrame
             )?.also {
                 cachePut(key, it)
+                rememberDelivered(it)
                 log("[+] Capture extraction successful (liveFrame: ${liveFrame != null}, size: ${it.size})")
             }
         }

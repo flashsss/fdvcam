@@ -103,6 +103,7 @@ class XCamModule : XposedModule() {
 
     fun isCapturingState() = captureManager.isCapturing
 
+    fun isDeliveredJpeg(bytes: ByteArray?) = captureManager.isDelivered(bytes)
     fun hasInjectionToken() = captureManager.hasInjectionToken()
     fun consumeInjectionToken() = captureManager.consumeInjectionToken()
 
