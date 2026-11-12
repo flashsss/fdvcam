@@ -4,6 +4,7 @@ object Constants {
     const val KEY_MEDIA_PATH = "media_path"
     const val KEY_IS_ENABLED = "is_enabled"
     const val KEY_IS_MIRRORED = "is_mirrored"
+    const val KEY_FIT_CONTAIN = "fit_contain"
     const val KEY_ROTATION_ANGLE = "rotation_angle"
     const val AUTHORITY = "com.suryasukma.vcamtest.provider"
 

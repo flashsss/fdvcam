@@ -9,6 +9,11 @@ import androidx.core.graphics.scale
  * for injection into camera streams.
  */
 class YuvFrameProcessor {
+    private companion object {
+        const val BLACK_Y: Byte = 16
+        const val NEUTRAL_UV: Byte = 128.toByte()
+    }
+
     private val nv21Buffer = ThreadLocal<ByteArray?>()
     private var cachedSource: ByteArray? = null
     private var cachedYuv: YuvData? = null
@@ -45,40 +50,48 @@ class YuvFrameProcessor {
             return nv21
         }
 
-        // Resample Y plane directly into target bounds
-        val xMap = IntArray(targetWidth) { (it * srcW) / targetWidth }
+        // Aspect-preserving resample (cover or contain, see FitConfig); samples outside the source become black.
+        val scale = FitConfig.scaleFor(targetWidth, targetHeight, srcW, srcH)
+        val xMap = FitConfig.axisMap(targetWidth, srcW, scale)
+        val yMap = FitConfig.axisMap(targetHeight, srcH, scale)
         for (y in 0 until targetHeight) {
-            val srcY = (y * srcH) / targetHeight
-            val srcYOffset = srcY * srcW
+            val srcY = yMap[y]
             val dstYOffset = y * targetWidth
+            if (srcY < 0) {
+                java.util.Arrays.fill(nv21, dstYOffset, dstYOffset + targetWidth, BLACK_Y)
+                continue
+            }
+            val srcYOffset = srcY * srcW
             for (x in 0 until targetWidth) {
-                val srcIdx = srcYOffset + xMap[x]
-                if (srcIdx < frame.yPlane.size) {
-                    nv21[dstYOffset + x] = frame.yPlane[srcIdx]
-                }
+                val sx = xMap[x]
+                val srcIdx = srcYOffset + sx
+                nv21[dstYOffset + x] = if (sx >= 0 && srcIdx < frame.yPlane.size) frame.yPlane[srcIdx] else BLACK_Y
             }
         }
 
-        // Resample UV planes (NV21 format: V first, U second)
+        // Chroma (NV21: V first, U second), same mapping at half resolution.
         val targetChromaW = (targetWidth + 1) / 2
         val targetChromaH = (targetHeight + 1) / 2
         val srcChromaW = (srcW + 1) / 2
         val srcChromaH = (srcH + 1) / 2
+        val cxMap = FitConfig.axisMap(targetChromaW, srcChromaW, scale)
+        val cyMap = FitConfig.axisMap(targetChromaH, srcChromaH, scale)
         var uvDstIdx = ySize
 
-        val cMap = IntArray(targetChromaW) { (it * srcChromaW) / targetChromaW }
         for (row in 0 until targetChromaH) {
-            val srcRow = (row * srcChromaH) / targetChromaH
-            val srcRowOffset = srcRow * srcChromaW
+            val srcRow = cyMap[row]
             for (col in 0 until targetChromaW) {
-                val srcIdx = srcRowOffset + cMap[col]
-                if (uvDstIdx + 1 < totalSize) {
-                    val vByte = if (srcIdx < frame.vPlane.size) frame.vPlane[srcIdx] else 128.toByte()
-                    val uByte = if (srcIdx < frame.uPlane.size) frame.uPlane[srcIdx] else 128.toByte()
-                    nv21[uvDstIdx] = vByte
-                    nv21[uvDstIdx + 1] = uByte
-                    uvDstIdx += 2
+                val srcCol = cxMap[col]
+                if (uvDstIdx + 1 >= totalSize) break
+                if (srcRow < 0 || srcCol < 0) {
+                    nv21[uvDstIdx] = NEUTRAL_UV
+                    nv21[uvDstIdx + 1] = NEUTRAL_UV
+                } else {
+                    val srcIdx = srcRow * srcChromaW + srcCol
+                    nv21[uvDstIdx] = if (srcIdx < frame.vPlane.size) frame.vPlane[srcIdx] else NEUTRAL_UV
+                    nv21[uvDstIdx + 1] = if (srcIdx < frame.uPlane.size) frame.uPlane[srcIdx] else NEUTRAL_UV
                 }
+                uvDstIdx += 2
             }
         }
 
@@ -156,41 +169,50 @@ class YuvFrameProcessor {
         val ch = (dstH + 1) / 2
         val scw = (srcW + 1) / 2
         val sch = (srcH + 1) / 2
-        resamplePlane(frame.yPlane, srcW, srcH, planes[0], dstW, dstH)
-        resamplePlane(frame.uPlane, scw, sch, planes[1], cw, ch)
-        resamplePlane(frame.vPlane, scw, sch, planes[2], cw, ch)
+        val scale = FitConfig.scaleFor(dstW, dstH, srcW, srcH)
+        resamplePlane(frame.yPlane, srcW, srcH, planes[0], dstW, dstH, scale, BLACK_Y)
+        resamplePlane(frame.uPlane, scw, sch, planes[1], cw, ch, scale, NEUTRAL_UV)
+        resamplePlane(frame.vPlane, scw, sch, planes[2], cw, ch, scale, NEUTRAL_UV)
     }
 
     /**
-     * Nearest-neighbour scales [src] (srcW x srcH, tightly packed) into an image plane of dstW x dstH.
-     * The column mapping is computed once; rows are written with bulk puts when the plane is contiguous.
+     * Nearest-neighbour scales [src] (srcW x srcH, tightly packed) into an image plane of dstW x dstH, preserving the
+     * aspect ratio ([scale] comes from FitConfig). Positions outside the source get [fill].
+     * Mappings are computed once; rows are written with bulk puts when the plane is contiguous.
      */
-    private fun resamplePlane(src: ByteArray, srcW: Int, srcH: Int, plane: Image.Plane, dstW: Int, dstH: Int) {
+    private fun resamplePlane(
+        src: ByteArray, srcW: Int, srcH: Int, plane: Image.Plane, dstW: Int, dstH: Int, scale: Float, fill: Byte,
+    ) {
         val buf = plane.buffer?.duplicate() ?: return
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
         val start = buf.position()
         val limit = buf.limit()
-        val xMap = IntArray(dstW) { (it * srcW) / dstW }
+        val xMap = FitConfig.axisMap(dstW, srcW, scale)
+        val yMap = FitConfig.axisMap(dstH, srcH, scale)
         val row = ByteArray(dstW)
 
         for (y in 0 until dstH) {
-            val srcRowOffset = ((y * srcH) / dstH) * srcW
             val dstRowOffset = start + y * rowStride
             if (dstRowOffset >= limit) break
+            val srcRow = yMap[y]
+            val srcRowOffset = if (srcRow < 0) -1 else srcRow * srcW
             if (pixelStride == 1) {
                 val n = minOf(dstW, limit - dstRowOffset)
                 for (x in 0 until n) {
-                    val si = srcRowOffset + xMap[x]
-                    row[x] = if (si < src.size) src[si] else 0
+                    val sx = xMap[x]
+                    val si = srcRowOffset + sx
+                    row[x] = if (srcRowOffset < 0 || sx < 0 || si >= src.size) fill else src[si]
                 }
                 buf.position(dstRowOffset)
                 buf.put(row, 0, n)
             } else {
                 for (x in 0 until dstW) {
                     val di = dstRowOffset + x * pixelStride
-                    val si = srcRowOffset + xMap[x]
-                    if (di < limit && si < src.size) buf.put(di, src[si])
+                    if (di >= limit) break
+                    val sx = xMap[x]
+                    val si = srcRowOffset + sx
+                    buf.put(di, if (srcRowOffset < 0 || sx < 0 || si >= src.size) fill else src[si])
                 }
             }
         }

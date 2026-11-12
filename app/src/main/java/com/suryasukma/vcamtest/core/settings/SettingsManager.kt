@@ -18,6 +18,7 @@ class SettingsManager {
                     mediaPath = cursor.getString(0)?.takeIf { enabled && it.isNotBlank() }
                     isMirrored = cursor.getString(2) == "1"
                     rotationAngle = cursor.getString(3).toIntOrNull() ?: 0
+                    if (cursor.columnCount > 4) com.suryasukma.vcamtest.core.capture.FitConfig.contain = cursor.getString(4) == "1"
                 }
             }
         } catch (_: Exception) {}

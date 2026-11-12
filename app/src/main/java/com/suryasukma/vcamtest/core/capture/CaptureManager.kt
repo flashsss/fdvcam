@@ -26,6 +26,7 @@ class CaptureManager(
 
     private data class CaptureKey(
         val path: String, val width: Int, val height: Int, val rotation: Int, val mirrored: Boolean,
+        val contain: Boolean = FitConfig.contain,
     )
 
     // Keyed by everything that changes the output, so a small stream frame can never be served as a full-size photo.

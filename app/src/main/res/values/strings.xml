@@ -80,5 +80,8 @@
     <string name="action_remove">Remove</string>
     <string name="btn_clear_logs">Clear</string>
     <string name="toast_logs_cleared">Logs cleared</string>
+    <string name="label_fit_mode">Fit mode (preview and photos)</string>
+    <string name="fit_fill">Fill (crop)</string>
+    <string name="fit_contain">Fit (letterbox)</string>
 </resources>
 

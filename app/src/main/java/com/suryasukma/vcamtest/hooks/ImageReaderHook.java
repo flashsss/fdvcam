@@ -105,7 +105,7 @@ public class ImageReaderHook {
                         String fmtName = getFormatName(format);
 
                         if (w > 0 && h > 0) {
-                            if (format == ImageFormat.JPEG || (w * h >= activeCaptureWidth * activeCaptureHeight)) {
+                            if (format == ImageFormat.JPEG || activeCaptureWidth == 0 || activeCaptureHeight == 0) {
                                 activeCaptureWidth = w;
                                 activeCaptureHeight = h;
                             }
@@ -140,7 +140,7 @@ public class ImageReaderHook {
                             String fmtName = getFormatName(format);
 
                             if (w > 0 && h > 0) {
-                                if (format == ImageFormat.JPEG || (w * h >= activeCaptureWidth * activeCaptureHeight)) {
+                                if (format == ImageFormat.JPEG || activeCaptureWidth == 0 || activeCaptureHeight == 0) {
                                     activeCaptureWidth = w;
                                     activeCaptureHeight = h;
                                 }

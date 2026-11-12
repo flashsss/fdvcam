@@ -106,7 +106,7 @@ object XCamCapture {
                 Pair(targetW, targetH)
             }
 
-            val scale = Math.max(resolvedTargetW.toFloat() / rotatedSourceW, resolvedTargetH.toFloat() / rotatedSourceH)
+            val scale = FitConfig.scaleFor(resolvedTargetW, resolvedTargetH, rotatedSourceW, rotatedSourceH)
             val matrix = AndroidMatrix().apply {
                 postScale(scale, scale)
                 if (rotation != 0) postRotate(rotation.toFloat())
@@ -117,6 +117,7 @@ object XCamCapture {
 
             val finalBitmap = createBitmap(resolvedTargetW, resolvedTargetH)
             android.graphics.Canvas(finalBitmap).apply {
+                drawColor(android.graphics.Color.BLACK) // letterbox bars in contain mode
                 val left = (resolvedTargetW - transformedSource.width) / 2f
                 val top = (resolvedTargetH - transformedSource.height) / 2f
                 drawBitmap(transformedSource, left, top, null)

@@ -33,6 +33,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.DynamicColors
 import com.google.android.material.color.MaterialColors
@@ -40,6 +41,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.suryasukma.vcamtest.R
 import com.suryasukma.vcamtest.data.Constants.KEY_ENABLE_CAPTURE_NOTIF
+import com.suryasukma.vcamtest.data.Constants.KEY_FIT_CONTAIN
 import com.suryasukma.vcamtest.data.Constants.KEY_IS_ENABLED
 import com.suryasukma.vcamtest.data.Constants.KEY_IS_MIRRORED
 import com.suryasukma.vcamtest.data.Constants.KEY_LATEST_PIPELINE_APP
@@ -254,6 +256,10 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         btnSelectMedia.setOnClickListener(pick)
         btnChooseEmpty.setOnClickListener(pick)
         btnEdit.setOnClickListener { editorLauncher.launch(Intent(this, EditorActivity::class.java)) }
+        findViewById<MaterialButtonToggleGroup>(R.id.toggle_fit).addOnButtonCheckedListener { _, id, checked ->
+            if (loadingSettings || !checked) return@addOnButtonCheckedListener
+            prefs.edit { putBoolean(KEY_FIT_CONTAIN, id == R.id.btn_fit_contain) }
+        }
         btnDeleteMedia.setOnClickListener { confirmDeleteMedia() }
         btnResetOriginal.setOnClickListener { resetToOriginal() }
 
@@ -396,6 +402,8 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
         loadingSettings = true
         switchCaptureNotif.isChecked = p.getBoolean(KEY_ENABLE_CAPTURE_NOTIF, true)
         switchEnabled.isChecked = p.getBoolean(KEY_IS_ENABLED, true)
+        findViewById<MaterialButtonToggleGroup>(R.id.toggle_fit)
+            .check(if (p.getBoolean(KEY_FIT_CONTAIN, false)) R.id.btn_fit_contain else R.id.btn_fit_fill)
         loadingSettings = false
         updatePreview(mediaPath)
         updatePreviewTransform()
