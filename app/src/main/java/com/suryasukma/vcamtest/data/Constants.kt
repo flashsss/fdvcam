@@ -20,6 +20,15 @@ object Constants {
 
     const val METHOD_RECORD_NODE = "record_node"
     const val METHOD_NOTIFY_CAPTURE = "notify_capture"
+    const val METHOD_LIST_CHALLENGE_ROLES = "list_challenge_roles"
     const val CAPTURE_NOTIFICATION_CHANNEL_ID = "xcam_capture_channel"
     const val CAPTURE_NOTIFICATION_ID = 1001
+
+    // Challenge Test (manual active-liveness testing): a tester switches the camera feed between a few labeled
+    // clips in real time, in reaction to an app's own prompts (e.g. "look left", "blink"). See media/ChallengeLibrary.kt.
+    const val CHALLENGE_FILE_PREFIX = "challenge_"
+    const val ACTION_CHALLENGE_START = "com.suryasukma.vcamtest.CHALLENGE_START"
+    const val ACTION_CHALLENGE_SWITCH = "com.suryasukma.vcamtest.CHALLENGE_SWITCH"
+    const val ACTION_CHALLENGE_STOP = "com.suryasukma.vcamtest.CHALLENGE_STOP"
+    const val EXTRA_CHALLENGE_ROLE = "role"
 }

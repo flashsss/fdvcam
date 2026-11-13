@@ -17,11 +17,15 @@ import androidx.media3.exoplayer.ExoPlayer
 /**
  * Handles Media3/ExoPlayer lifecycle and state management for video injection.
  *
- * All player calls happen on the main thread. Every play()/stop() call bumps [generation]; a queued request whose
- * generation is no longer current is dropped, so the newest request always wins and none is lost to a "busy" flag.
+ * All player calls happen on the main thread. Every play()/stop()/playChallengeSet() call bumps [generation]; a
+ * queued request whose generation is no longer current is dropped, so the newest request always wins and none is
+ * lost to a "busy" flag.
  */
 @UnstableApi
 class MediaEngine(private val logAction: (String) -> Unit) {
+
+    /** One labeled clip in a Challenge Test playlist (see [playChallengeSet]). */
+    data class ChallengeItem(val role: String, val path: String)
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
@@ -37,6 +41,9 @@ class MediaEngine(private val logAction: (String) -> Unit) {
     @Volatile private var anchorPosMs = 0L
     @Volatile private var durationMs = 0L
 
+    // Roles loaded into the current playlist, in player-item order; empty when not in Challenge Test mode.
+    @Volatile private var challengeRoles: List<String> = emptyList()
+
     @Volatile
     var videoWidth = 0
         private set
@@ -47,6 +54,10 @@ class MediaEngine(private val logAction: (String) -> Unit) {
 
     val isPlaying: Boolean
         get() = isPlayingInternal
+
+    /** True while a multi-clip Challenge Test playlist (see [playChallengeSet]) is the active player. */
+    val isChallengeActive: Boolean
+        get() = challengeRoles.isNotEmpty() && player != null
 
     /** Approximate current position of the looping clip. Never blocks. */
     val currentPosition: Long
@@ -65,6 +76,7 @@ class MediaEngine(private val logAction: (String) -> Unit) {
     private fun releasePlayer() {
         val p = player
         player = null
+        challengeRoles = emptyList()
         try {
             p?.apply {
                 stop()
@@ -87,6 +99,25 @@ class MediaEngine(private val logAction: (String) -> Unit) {
             if (gen != generation) return@post // a newer play() already replaced this stop
             releasePlayer()
         }
+    }
+
+    private fun buildPlayer(context: Context, isMirrored: Boolean, rotationAngle: Int): ExoPlayer {
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context.applicationContext)
+            .setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        val exoPlayer = ExoPlayer.Builder(context.applicationContext, renderersFactory).build()
+        exoPlayer.volume = 0f // video only: the audio path is handled by AudioHook
+        if (isMirrored || rotationAngle != 0) {
+            exoPlayer.setVideoEffects(
+                listOf(
+                    ScaleAndRotateTransformation.Builder()
+                        .setScale(if (isMirrored) -1f else 1f, 1f)
+                        .setRotationDegrees(rotationAngle.toFloat())
+                        .build()
+                )
+            )
+        }
+        exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
+        return exoPlayer
     }
 
     fun play(
@@ -127,27 +158,10 @@ class MediaEngine(private val logAction: (String) -> Unit) {
             try {
                 log(tag, "Loading media: $path (Video only pipeline)")
 
-                val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context.applicationContext)
-                    .setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-
-                val exoPlayer = ExoPlayer.Builder(context.applicationContext, renderersFactory).build()
+                val exoPlayer = buildPlayer(context, isMirrored, rotationAngle)
                 player = exoPlayer
-                exoPlayer.volume = 0f // video only: the audio path is handled by AudioHook
-
-                val effects = mutableListOf<Effect>()
-                if (isMirrored || rotationAngle != 0) {
-                    effects.add(
-                        ScaleAndRotateTransformation.Builder()
-                            .setScale(if (isMirrored) -1f else 1f, 1f)
-                            .setRotationDegrees(rotationAngle.toFloat())
-                            .build()
-                    )
-                }
-                if (effects.isNotEmpty()) exoPlayer.setVideoEffects(effects)
-
                 exoPlayer.setMediaItem(MediaItem.fromUri(path.toUri()))
                 exoPlayer.setVideoSurface(surface)
-                exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
 
                 var started = false
                 // Watchdog: a player that never becomes ready (stuck decoder / surface) would show a frozen frame forever.
@@ -204,6 +218,102 @@ class MediaEngine(private val logAction: (String) -> Unit) {
                 log(tag, "Prepare failed: ${e.message}")
                 releasePlayer()
                 retry()
+            }
+        }
+    }
+
+    /**
+     * Prepares a looping multi-clip playlist for Challenge Test mode: every clip in [items] is loaded once, and
+     * [switchChallenge] then jumps between them with a single seek — far faster than tearing the player down and
+     * rebuilding it, which is what [play] does for the normal single-clip case and would otherwise make switching
+     * feel laggy when reacting to an active-liveness prompt.
+     */
+    fun playChallengeSet(
+        context: Context,
+        items: List<ChallengeItem>,
+        surface: Surface,
+        tag: String,
+        isMirrored: Boolean = false,
+        rotationAngle: Int = 0,
+        startRole: String? = null,
+    ) {
+        if (items.isEmpty()) return
+        val gen = ++generation
+        mainHandler.post {
+            if (gen != generation) return@post
+            releasePlayer()
+            if (!surface.isValid) return@post
+
+            try {
+                log(tag, "Loading challenge set: ${items.map { it.role }}")
+
+                val exoPlayer = buildPlayer(context, isMirrored, rotationAngle)
+                player = exoPlayer
+                challengeRoles = items.map { it.role }
+                exoPlayer.setVideoSurface(surface)
+                val startIndex = startRole
+                    ?.let { role -> items.indexOfFirst { it.role == role } }
+                    ?.takeIf { it >= 0 } ?: 0
+                exoPlayer.setMediaItems(items.map { MediaItem.fromUri(it.path.toUri()) }, startIndex, 0L)
+
+                exoPlayer.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (gen != generation) return
+                        isPlayingInternal = isPlaying
+                        anchorPosMs = exoPlayer.currentPosition
+                        anchorWallMs = SystemClock.elapsedRealtime()
+                    }
+
+                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                        if (videoSize.width > 0) {
+                            videoWidth = videoSize.width
+                            videoHeight = videoSize.height
+                        }
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        // Re-fires on every switchChallenge() seek too: recomputing duration and (re-)calling play()
+                        // each time is cheap and keeps the current item's duration correct for currentPosition().
+                        if (playbackState != Player.STATE_READY || gen != generation) return
+                        durationMs = exoPlayer.duration.coerceAtLeast(0L)
+                        try {
+                            exoPlayer.play()
+                        } catch (e: Throwable) {
+                            log(tag, "Challenge start failed: ${e.message}")
+                        }
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        log(tag, "Challenge player Error: ${error.errorCodeName} | ${error.message}")
+                        if (gen == generation) releasePlayer()
+                    }
+                })
+
+                exoPlayer.prepare()
+            } catch (e: Throwable) {
+                log(tag, "Challenge prepare failed: ${e.message}")
+                releasePlayer()
+            }
+        }
+    }
+
+    /** Switches the active clip within a running Challenge Test playlist. No-op if [role] isn't loaded. */
+    fun switchChallenge(role: String) {
+        mainHandler.post {
+            val index = challengeRoles.indexOf(role)
+            val p = player
+            if (index < 0 || p == null) {
+                log("CHALLENGE", "Switch to '$role' ignored (not loaded or no active session)")
+                return@post
+            }
+            try {
+                p.seekTo(index, 0L)
+                p.playWhenReady = true
+                anchorPosMs = 0L
+                anchorWallMs = SystemClock.elapsedRealtime()
+                log("CHALLENGE", "Switched to '$role'")
+            } catch (e: Throwable) {
+                log("CHALLENGE", "Switch to '$role' failed: ${e.message}")
             }
         }
     }

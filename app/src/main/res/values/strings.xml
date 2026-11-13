@@ -83,5 +83,22 @@
     <string name="label_fit_mode">Fit mode (preview and photos)</string>
     <string name="fit_fill">Fill (crop)</string>
     <string name="fit_contain">Fit (letterbox)</string>
+    <string name="label_challenge_test">Challenge Test</string>
+    <string name="label_challenge_test_desc">Manually switch the camera feed to match active-liveness prompts (look left/right, blink) while testing your own system.</string>
+    <string name="btn_open_challenge_test">Open Challenge Test</string>
+    <string name="label_challenge_hint">Import a short clip for each action your liveness check may ask for. During a test, a floating panel lets you switch instantly without leaving the app under test.</string>
+    <string name="label_clip_ready">Clip ready</string>
+    <string name="label_clip_missing">No clip imported</string>
+    <string name="btn_import">Import</string>
+    <string name="btn_start_challenge_test">Start Challenge Test</string>
+    <string name="btn_stop_challenge_test">Stop Challenge Test</string>
+    <string name="label_overlay_permission_hint">Needs permission to draw over other apps, requested once you tap Start.</string>
+    <string name="toast_overlay_permission_needed">Allow FDVCam to draw over other apps, then tap Start again</string>
+    <string name="toast_import_at_least_one">Import at least one clip first</string>
+    <string name="toast_challenge_started">Challenge Test started — a floating panel should now be visible</string>
+    <string name="role_neutral">Neutral</string>
+    <string name="role_look_left">Look Left</string>
+    <string name="role_look_right">Look Right</string>
+    <string name="role_blink">Blink</string>
 </resources>
 

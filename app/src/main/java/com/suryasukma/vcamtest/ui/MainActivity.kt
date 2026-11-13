@@ -260,6 +260,9 @@ class MainActivity : AppCompatActivity(), XposedServiceHelper.OnServiceListener 
             if (loadingSettings || !checked) return@addOnButtonCheckedListener
             prefs.edit { putBoolean(KEY_FIT_CONTAIN, id == R.id.btn_fit_contain) }
         }
+        findViewById<View>(R.id.btn_challenge_test).setOnClickListener {
+            startActivity(Intent(this, ChallengeActivity::class.java))
+        }
         btnDeleteMedia.setOnClickListener { confirmDeleteMedia() }
         btnResetOriginal.setOnClickListener { resetToOriginal() }
 

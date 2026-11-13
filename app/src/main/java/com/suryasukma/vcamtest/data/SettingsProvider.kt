@@ -31,6 +31,17 @@ class SettingsProvider : ContentProvider() {
         if (arg == null || callerPackages == null || !callerPackages.contains(arg)) return null
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+        if (method == com.suryasukma.vcamtest.data.Constants.METHOD_LIST_CHALLENGE_ROLES) {
+            // Availability probe for Challenge Test mode: which clips exist, so a hooked process never queues a
+            // role that has nothing to play. Same access rule as everything else in this provider (see above).
+            val result = Bundle()
+            for (role in com.suryasukma.vcamtest.media.ChallengeRole.entries) {
+                val file = File(ctx.filesDir, com.suryasukma.vcamtest.media.ChallengeLibrary.fileName(role))
+                result.putBoolean(role.key, file.exists() && file.length() > 0)
+            }
+            return result
+        }
+
         when (method) {
             com.suryasukma.vcamtest.data.Constants.METHOD_RECORD_NODE -> {
                 val packageName = arg ?: "Unknown"
@@ -96,6 +107,18 @@ class SettingsProvider : ContentProvider() {
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val context = context ?: return null
         val fileName = uri.lastPathSegment ?: return null
+
+        // Challenge Test clips: exact name only, no fallback guessing (unlike the single-media slot below).
+        if (fileName.startsWith(com.suryasukma.vcamtest.data.Constants.CHALLENGE_FILE_PREFIX)) {
+            val file = File(context.filesDir, fileName)
+            if (!file.exists()) return null
+            return try {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
         // Only the playable media is exposed; the original (source.*) and temp files stay private.
         if (!fileName.startsWith("virtual.")) return null
         val file = File(context.filesDir, fileName)

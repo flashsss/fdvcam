@@ -1,9 +1,14 @@
 package com.suryasukma.vcamtest.xposed
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.SurfaceTexture
 import android.os.Build
 import android.view.Surface
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.media3.common.util.UnstableApi
 import com.suryasukma.vcamtest.core.audio.MediaCodecAudioDecoder
 import com.suryasukma.vcamtest.core.capture.CaptureManager
@@ -15,6 +20,7 @@ import com.suryasukma.vcamtest.core.settings.SettingsManager
 import com.suryasukma.vcamtest.core.surface.SurfaceManager
 import com.suryasukma.vcamtest.core.surface.SurfaceProvider
 import com.suryasukma.vcamtest.core.telemetry.PipelineTracker
+import com.suryasukma.vcamtest.media.ChallengeRole
 import com.suryasukma.vcamtest.utils.Logger
 import com.suryasukma.vcamtest.utils.SystemUtils
 import com.suryasukma.vcamtest.utils.UIUtils
@@ -193,6 +199,85 @@ class XCamModule : XposedModule() {
     fun handleModernPreview(s: Surface) = engine.handleModernPreview(s)
     fun getDummySurface() = engine.getDummySurface()
 
+    // ---- Challenge Test (manual active-liveness testing) --------------------------------------------------------
+    // Controlled by broadcasts from the FDVCam manager app (its ChallengeActivity / floating overlay), received
+    // here inside the hooked host process. See media/ChallengeLibrary.kt and core/engine/XCamEngine.kt.
+
+    fun isChallengeActive() = engine.isChallengeActive()
+
+    fun startChallenge() {
+        val ctx = mContext ?: return
+        try {
+            val result = ctx.contentResolver.call(
+                "content://${Constants.AUTHORITY}".toUri(),
+                Constants.METHOD_LIST_CHALLENGE_ROLES,
+                ctx.packageName,
+                null,
+            )
+            if (result == null) {
+                logHook("[!] Challenge Test: could not reach the settings provider")
+                return
+            }
+            val items = ChallengeRole.entries
+                .filter { result.getBoolean(it.key, false) }
+                .map { role -> MediaEngine.ChallengeItem(role.key, "content://${Constants.AUTHORITY}/challenge_${role.key}.mp4") }
+            if (items.isEmpty()) {
+                logHook("[!] Challenge Test: no clips imported yet")
+                return
+            }
+            recordPipelineNode("Challenge(start)")
+            engine.startChallengeMode(items, startRole = ChallengeRole.NEUTRAL.key)
+        } catch (t: Throwable) {
+            logHook("[!] Challenge Test start failed: $t")
+        }
+    }
+
+    fun switchChallenge(role: String) {
+        try {
+            recordPipelineNode("Challenge($role)")
+            engine.switchChallenge(role)
+        } catch (t: Throwable) {
+            logHook("[!] Challenge Test switch failed: $t")
+        }
+    }
+
+    fun stopChallenge() {
+        try {
+            recordPipelineNode("Challenge(stop)")
+            engine.stopChallengeMode()
+        } catch (t: Throwable) {
+            logHook("[!] Challenge Test stop failed: $t")
+        }
+    }
+
+    private var challengeReceiver: BroadcastReceiver? = null
+
+    /** Lets the FDVCam manager app (its own process) drive Challenge Test mode inside this hooked process. */
+    private fun registerChallengeReceiver(ctx: Context) {
+        if (challengeReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    Constants.ACTION_CHALLENGE_START -> startChallenge()
+                    Constants.ACTION_CHALLENGE_SWITCH -> intent.getStringExtra(Constants.EXTRA_CHALLENGE_ROLE)?.let { switchChallenge(it) }
+                    Constants.ACTION_CHALLENGE_STOP -> stopChallenge()
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Constants.ACTION_CHALLENGE_START)
+            addAction(Constants.ACTION_CHALLENGE_SWITCH)
+            addAction(Constants.ACTION_CHALLENGE_STOP)
+        }
+        try {
+            ContextCompat.registerReceiver(ctx, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
+            challengeReceiver = receiver
+            logHook("[+] Challenge Test broadcast receiver registered")
+        } catch (t: Throwable) {
+            logHook("[!] Failed to register Challenge Test receiver: $t")
+        }
+    }
+
     /** Starts the audio decoder ahead of the first AudioRecord#read so the audio thread never waits for it. */
     fun warmUpAudio() {
         val path = settings.mediaPath ?: return
@@ -278,7 +363,7 @@ class XCamModule : XposedModule() {
         if (currentApp != null && !isInitialized) {
             mContext = currentApp
             logInit("Context immediately resolved from ActivityThread: ${mContext?.packageName}")
-            mContext?.let { refreshSettingsAsync(it) }
+            mContext?.let { refreshSettingsAsync(it); registerChallengeReceiver(it) }
             isInitialized = true
         }
 
@@ -292,7 +377,7 @@ class XCamModule : XposedModule() {
                     // Prefer the application context so we never keep an Activity alive.
                     mContext = (chain.thisObject as? Context)?.let { it.applicationContext ?: it }
                     logInit("Context Initialized: ${mContext?.packageName}")
-                    mContext?.let { refreshSettingsAsync(it) }
+                    mContext?.let { refreshSettingsAsync(it); registerChallengeReceiver(it) }
                     isInitialized = true
                 }
                 result

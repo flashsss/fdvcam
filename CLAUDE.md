@@ -26,3 +26,10 @@
 ## Hemat token
 - Jawaban singkat; tanpa ringkasan panjang setelah selesai.
 - Baca hanya file yang relevan; gunakan Grep/Glob sebelum membaca file besar.
+
+## Challenge Test (active-liveness testing)
+- `media/ChallengeLibrary.kt`: stores up to 4 labeled clips (Neutral/Look Left/Look Right/Blink) as `challenge_<role>.mp4`.
+- `ui/ChallengeActivity.kt`: import/delete clips, Start/Stop (requests overlay permission).
+- `service/OverlayService.kt`: floating panel drawn over the app under test; taps send broadcasts.
+- `XCamModule` (hooked process) listens for `ACTION_CHALLENGE_START/SWITCH/STOP` and drives `XCamEngine`/`MediaEngine` (one warm ExoPlayer playlist, switched by index — no rebuild per tap).
+- For testing your own fraud-detection/liveness system only; never for evading detection on systems you don't own or lack authorization to test.

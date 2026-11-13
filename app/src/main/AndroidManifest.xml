@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission" />
+    <!-- Challenge Test's floating control panel (OverlayService): drawn on top of the app under test so a tester
+         can switch the camera feed without leaving it (leaving would normally close its camera session). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <queries>
         <intent>
@@ -53,6 +56,12 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.ChallengeActivity"
+            android:exported="false" />
+        <service
+            android:name=".service.OverlayService"
+            android:exported="false" />
         <provider
             android:name=".data.SettingsProvider"
             android:authorities="com.suryasukma.vcamtest.provider"

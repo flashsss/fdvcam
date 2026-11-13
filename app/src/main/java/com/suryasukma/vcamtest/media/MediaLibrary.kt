@@ -181,7 +181,8 @@ object MediaLibrary {
 
     // ---- type detection ----------------------------------------------------
 
-    private fun extensionFor(mime: String?, uri: Uri): String? {
+    // internal (not private): reused by ChallengeLibrary.kt for its own clip import pipeline.
+    internal fun extensionFor(mime: String?, uri: Uri): String? {
         val map = MimeTypeMap.getSingleton()
         if (mime != null && (mime.startsWith("image/") || mime.startsWith("video/"))) {
             return map.getExtensionFromMimeType(mime) ?: if (mime.startsWith("video/")) "mp4" else "jpg"
@@ -191,7 +192,7 @@ object MediaLibrary {
         return if (guessed != null && (guessed.startsWith("image/") || guessed.startsWith("video/"))) fromName else null
     }
 
-    private fun sniffExtension(file: File): String? {
+    internal fun sniffExtension(file: File): String? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
         if (bounds.outWidth > 0 && bounds.outHeight > 0) return "jpg"
